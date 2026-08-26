@@ -107,4 +107,14 @@ class VertexWriter implements VertexConsumer {
 
 		return dataCopy;
 	}
+	@Override
+	public VertexConsumer setLineWidth(float width) {
+		// Line width is meaningless for the mesh data this writer produces.
+		return this;
+	}
+	@Override
+	public VertexConsumer setColor(int color) {
+		// ignore color
+		return this;
+	}
 }

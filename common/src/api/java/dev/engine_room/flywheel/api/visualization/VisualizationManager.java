@@ -1,6 +1,6 @@
 package dev.engine_room.flywheel.api.visualization;
 
-import java.util.SortedSet;
+import java.util.List;
 
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
@@ -8,9 +8,8 @@ import org.jetbrains.annotations.Nullable;
 import dev.engine_room.flywheel.api.backend.RenderContext;
 import dev.engine_room.flywheel.api.internal.FlwApiLink;
 import dev.engine_room.flywheel.api.visual.Effect;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import net.minecraft.core.Vec3i;
-import net.minecraft.server.level.BlockDestructionProgress;
+import net.minecraft.client.renderer.state.level.BlockBreakingRenderState;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -70,8 +69,8 @@ public interface VisualizationManager {
 		 * Render crumbling block entities.
 		 *
 		 * <p>Guaranteed to be called after {@link #onStartLevelRender} and {@link #afterEntities}
-		 * @param destructionProgress The destruction progress map from {@link net.minecraft.client.renderer.LevelRenderer LevelRenderer}.
+		 * @param blockBreaking The block breaking states extracted for this frame.
 		 */
-		void beforeCrumbling(RenderContext ctx, Long2ObjectMap<SortedSet<BlockDestructionProgress>> destructionProgress);
+		void beforeCrumbling(RenderContext ctx, List<BlockBreakingRenderState> blockBreaking);
 	}
 }

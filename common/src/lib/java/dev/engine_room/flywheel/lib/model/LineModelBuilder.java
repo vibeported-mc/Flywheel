@@ -16,7 +16,7 @@ import dev.engine_room.flywheel.lib.material.StandardMaterialShaders;
 import dev.engine_room.flywheel.lib.memory.MemoryBlock;
 import dev.engine_room.flywheel.lib.vertex.FullVertexView;
 import dev.engine_room.flywheel.lib.vertex.VertexView;
-import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 
 public final class LineModelBuilder {
@@ -91,7 +91,7 @@ public final class LineModelBuilder {
 			vertexView.u(vertexCount + i, 0);
 			vertexView.v(vertexCount + i, 0);
 			vertexView.overlay(vertexCount + i, OverlayTexture.NO_OVERLAY);
-			vertexView.light(vertexCount + i, LightTexture.FULL_BRIGHT);
+			vertexView.light(vertexCount + i, LightCoordsUtil.FULL_BRIGHT);
 			vertexView.normalX(vertexCount + i, normalX);
 			vertexView.normalY(vertexCount + i, normalY);
 			vertexView.normalZ(vertexCount + i, normalZ);

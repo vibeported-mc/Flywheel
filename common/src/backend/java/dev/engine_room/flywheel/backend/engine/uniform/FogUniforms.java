@@ -1,27 +1,38 @@
 package dev.engine_room.flywheel.backend.engine.uniform;
 
-import com.mojang.blaze3d.shaders.FogShape;
-import com.mojang.blaze3d.systems.RenderSystem;
+import org.joml.Vector4fc;
+
+import dev.engine_room.flywheel.api.backend.RenderContext;
+import net.minecraft.client.renderer.fog.FogData;
 
 public final class FogUniforms extends UniformWriter {
-	private static final int SIZE = 4 * 7;
+	// vec4 color + two vec2 ranges.
+	private static final int SIZE = 4 * 8;
 	static final UniformBuffer BUFFER = new UniformBuffer(Uniforms.FOG_INDEX, SIZE);
 
-	public static void update() {
+	private FogUniforms() {
+	}
+
+	/**
+	 * Minecraft 26.2 dropped the single range + fog shape pair in favor of two independent linear
+	 * fogs: an environmental one measured spherically, and a render distance one measured
+	 * cylindrically. The stronger of the two wins, exactly as vanilla's own fog shader does.
+	 */
+	public static void update(RenderContext context) {
 		long ptr = BUFFER.ptr();
 
-		var color = RenderSystem.getShaderFogColor();
+		FogData fog = context.camera().fogData;
+		Vector4fc color = fog.color;
 
-		ptr = writeFloat(ptr, color[0]);
-		ptr = writeFloat(ptr, color[1]);
-		ptr = writeFloat(ptr, color[2]);
-		ptr = writeFloat(ptr, color[3]);
-		ptr = writeFloat(ptr, RenderSystem.getShaderFogStart());
-		ptr = writeFloat(ptr, RenderSystem.getShaderFogEnd());
+		ptr = writeFloat(ptr, color.x());
+		ptr = writeFloat(ptr, color.y());
+		ptr = writeFloat(ptr, color.z());
+		ptr = writeFloat(ptr, color.w());
 
-		var fogShape = RenderSystem.getShaderFogShape();
-		// Shouldn't ever be null, but we've seen crashes here.
-		ptr = writeInt(ptr, (fogShape == null ? FogShape.SPHERE : fogShape).getIndex());
+		ptr = writeFloat(ptr, fog.environmentalStart);
+		ptr = writeFloat(ptr, fog.environmentalEnd);
+		ptr = writeFloat(ptr, fog.renderDistanceStart);
+		ptr = writeFloat(ptr, fog.renderDistanceEnd);
 
 		BUFFER.markDirty();
 	}

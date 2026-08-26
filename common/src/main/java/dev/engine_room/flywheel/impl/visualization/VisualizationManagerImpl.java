@@ -2,7 +2,6 @@ package dev.engine_room.flywheel.impl.visualization;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.SortedSet;
 
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nullable;
@@ -40,13 +39,12 @@ import dev.engine_room.flywheel.lib.task.MapContextPlan;
 import dev.engine_room.flywheel.lib.task.NestedPlan;
 import dev.engine_room.flywheel.lib.task.SimplePlan;
 import dev.engine_room.flywheel.lib.util.LevelAttached;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.Vec3i;
-import net.minecraft.server.level.BlockDestructionProgress;
+import net.minecraft.client.renderer.state.level.BlockBreakingRenderState;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
@@ -134,8 +132,7 @@ public class VisualizationManagerImpl implements VisualizationManager {
 
 		private DynamicVisual.Context createVisualFrameContext(RenderContext ctx) {
 			Vec3i renderOrigin = engine.renderOrigin();
-			var cameraPos = ctx.camera()
-					.getPosition();
+			var cameraPos = ctx.camera().pos;
 
 			Matrix4f viewProjection = new Matrix4f(ctx.viewProjection());
 			viewProjection.translate((float) (renderOrigin.getX() - cameraPos.x), (float) (renderOrigin.getY() - cameraPos.y), (float) (renderOrigin.getZ() - cameraPos.z));
@@ -276,22 +273,19 @@ public class VisualizationManagerImpl implements VisualizationManager {
 		lateInit().engine.render(context);
 	}
 
-	private void renderCrumbling(RenderContext context, Long2ObjectMap<SortedSet<BlockDestructionProgress>> destructionProgress) {
-		if (destructionProgress.isEmpty()) {
+	private void renderCrumbling(RenderContext context, List<BlockBreakingRenderState> blockBreaking) {
+		if (blockBreaking.isEmpty()) {
 			return;
 		}
 
 		List<Engine.CrumblingBlock> crumblingBlocks = new ArrayList<>();
 
-		for (var entry : destructionProgress.long2ObjectEntrySet()) {
-			var set = entry.getValue();
-			if (set == null || set.isEmpty()) {
-				// Nothing to do if there's no crumbling.
-				continue;
-			}
-
+		// 26.2 hands us a flat list of block breaking states rather than a position-keyed map of
+		// sorted progress, and it has already picked the state to draw for each position.
+		for (BlockBreakingRenderState state : blockBreaking) {
 			var visual = blockEntities.getStorage()
-					.visualAtPos(entry.getLongKey());
+					.visualAtPos(state.blockPos()
+							.asLong());
 
 			if (visual == null) {
 				// The block doesn't have a visual, this is probably the common case.
@@ -311,9 +305,7 @@ public class VisualizationManagerImpl implements VisualizationManager {
 				continue;
 			}
 
-			var maxDestruction = set.last();
-
-			crumblingBlocks.add(new CrumblingBlockImpl(maxDestruction.getPos(), maxDestruction.getProgress(), instances));
+			crumblingBlocks.add(new CrumblingBlockImpl(state.blockPos(), state.progress(), instances));
 		}
 
 		if (!crumblingBlocks.isEmpty()) {
@@ -373,8 +365,8 @@ public class VisualizationManagerImpl implements VisualizationManager {
 		}
 
 		@Override
-		public void beforeCrumbling(RenderContext ctx, Long2ObjectMap<SortedSet<BlockDestructionProgress>> destructionProgress) {
-			renderCrumbling(ctx, destructionProgress);
+		public void beforeCrumbling(RenderContext ctx, List<BlockBreakingRenderState> blockBreaking) {
+			renderCrumbling(ctx, blockBreaking);
 		}
 	}
 

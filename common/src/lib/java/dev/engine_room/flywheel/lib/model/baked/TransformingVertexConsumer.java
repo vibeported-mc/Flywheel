@@ -68,4 +68,14 @@ class TransformingVertexConsumer implements VertexConsumer {
 				MatrixMath.transformNormalZ(matrix, x, y, z));
 		return this;
 	}
+	@Override
+	public VertexConsumer setLineWidth(float width) {
+		delegate.setLineWidth(width);
+		return this;
+	}
+	@Override
+	public VertexConsumer setColor(int color) {
+		delegate.setColor(color);
+		return this;
+	}
 }

@@ -1,5 +1,7 @@
 package dev.engine_room.vanillin.visuals;
 
+
+import net.minecraft.world.entity.EntityTypes;
 import org.joml.Matrix4f;
 
 import dev.engine_room.flywheel.api.model.Model;
@@ -13,7 +15,7 @@ import dev.engine_room.flywheel.lib.visual.AbstractVisual;
 import dev.engine_room.flywheel.lib.visual.SimpleDynamicVisual;
 import dev.engine_room.vanillin.item.ItemModels;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.client.resources.model.ModelManager;
 import net.minecraft.client.resources.model.ModelResourceLocation;
 import net.minecraft.core.BlockPos;
@@ -86,7 +88,7 @@ public class ItemFrameVisual extends AbstractVisual implements EntityVisual<Item
 	}
 
 	public void animate(float partialTick) {
-		var light = LightTexture.pack(getBlockLightLevel(entity.getPos()), getSkyLightLevel(entity.getPos()));
+		var light = LightCoordsUtil.pack(getBlockLightLevel(entity.getPos()), getSkyLightLevel(entity.getPos()));
 
 		boolean invisible = entity.isInvisible();
 
@@ -156,7 +158,7 @@ public class ItemFrameVisual extends AbstractVisual implements EntityVisual<Item
 	}
 
 	private int getLightVal(int glowLightVal, int regularLightVal) {
-		return entity.getType() == EntityType.GLOW_ITEM_FRAME ? glowLightVal : regularLightVal;
+		return entity.getType() == EntityTypes.GLOW_ITEM_FRAME ? glowLightVal : regularLightVal;
 	}
 
 	protected int getSkyLightLevel(BlockPos pos) {
@@ -168,11 +170,11 @@ public class ItemFrameVisual extends AbstractVisual implements EntityVisual<Item
 	}
 
 	protected int getBlockLightLevel(BlockPos pos) {
-		return entity.getType() == EntityType.GLOW_ITEM_FRAME ? Math.max(5, getBlockLightLevelBase(pos)) : getBlockLightLevelBase(pos);
+		return entity.getType() == EntityTypes.GLOW_ITEM_FRAME ? Math.max(5, getBlockLightLevelBase(pos)) : getBlockLightLevelBase(pos);
 	}
 
 	public static ModelResourceLocation getFrameModelResourceLoc(ItemFrame entity, ItemStack item) {
-		boolean bl = entity.getType() == EntityType.GLOW_ITEM_FRAME;
+		boolean bl = entity.getType() == EntityTypes.GLOW_ITEM_FRAME;
 		if (item.is(Items.FILLED_MAP)) {
 			return bl ? GLOW_MAP_FRAME_LOCATION : MAP_FRAME_LOCATION;
 		} else {

@@ -42,7 +42,7 @@ public class ShulkerBoxVisual extends AbstractBlockEntityVisual<ShulkerBoxBlockE
 		super(ctx, blockEntity, partialTick);
 
 		DyeColor color = blockEntity.getColor();
-		net.minecraft.client.resources.model.Material texture;
+		net.minecraft.client.resources.model.sprite.Material texture;
 		if (color == null) {
 			texture = Sheets.DEFAULT_SHULKER_TEXTURE_LOCATION;
 		} else {

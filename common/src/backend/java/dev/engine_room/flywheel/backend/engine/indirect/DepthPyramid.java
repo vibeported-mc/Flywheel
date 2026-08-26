@@ -1,9 +1,11 @@
 package dev.engine_room.flywheel.backend.engine.indirect;
 
+
+import com.mojang.blaze3d.opengl.GlTexture;
 import org.lwjgl.opengl.GL32;
 import org.lwjgl.opengl.GL46;
 
-import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.opengl.GlStateManager;
 
 import dev.engine_room.flywheel.backend.compile.IndirectPrograms;
 import dev.engine_room.flywheel.backend.gl.GlTextureUnit;
@@ -23,8 +25,7 @@ public class DepthPyramid {
 	}
 
 	public void generate() {
-		var mainRenderTarget = Minecraft.getInstance()
-				.getMainRenderTarget();
+		var mainRenderTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
 
 		int width = mip0Size(mainRenderTarget.width);
 		int height = mip0Size(mainRenderTarget.height);
@@ -32,7 +33,7 @@ public class DepthPyramid {
 
 		createPyramidMips(mipLevels, width, height);
 
-		int depthBufferId = mainRenderTarget.getDepthTextureId();
+		int depthBufferId = ((GlTexture) mainRenderTarget.getDepthTexture()).glId();
 
 		GL46.glMemoryBarrier(GL46.GL_FRAMEBUFFER_BARRIER_BIT);
 

@@ -1,6 +1,8 @@
 package dev.engine_room.flywheel.lib.model;
 
 import java.util.Collection;
+import java.util.IdentityHashMap;
+import java.util.Map;
 
 import org.jetbrains.annotations.Nullable;
 import org.joml.Vector3f;
@@ -15,21 +17,26 @@ import dev.engine_room.flywheel.lib.material.Materials;
 import dev.engine_room.flywheel.lib.material.SimpleMaterial;
 import dev.engine_room.flywheel.lib.memory.MemoryBlock;
 import dev.engine_room.flywheel.lib.vertex.PosVertexView;
-import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.Sheets;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 
 public final class ModelUtil {
 	private static final float BOUNDING_SPHERE_EPSILON = 1e-4f;
 
-	private static final RenderType[] CHUNK_LAYERS = new RenderType[]{RenderType.solid(), RenderType.cutoutMipped(), RenderType.cutout(), RenderType.translucent(), RenderType.tripwire()};
-
+	// Minecraft 26.2 collapsed the chunk render types into the ChunkSectionLayer enum: the separate
+	// mipped/non-mipped cutout layers were merged, and tripwire is no longer a chunk layer of its own.
 	// Array of chunk materials to make lookups easier.
-	// Index by (renderTypeIdx * 4 + shaded * 2 + ambientOcclusion).
-	private static final Material[] CHUNK_MATERIALS = new Material[20];
+	// Index by (chunkSectionLayer.ordinal() * 4 + shaded * 2 + ambientOcclusion).
+	private static final Material[] CHUNK_MATERIALS = new Material[ChunkSectionLayer.values().length * 4];
+
+	// Item render types are no longer chunk layers, so they get their own lookup.
+	private static final Map<RenderType, Material> ITEM_MATERIALS = new IdentityHashMap<>();
 
 	static {
-		Material[] baseChunkMaterials = new Material[]{Materials.SOLID_BLOCK, Materials.CUTOUT_MIPPED_BLOCK, Materials.CUTOUT_BLOCK, Materials.TRANSLUCENT_BLOCK, Materials.TRIPWIRE_BLOCK,};
-		for (int chunkLayerIdx = 0; chunkLayerIdx < CHUNK_LAYERS.length; chunkLayerIdx++) {
+		Material[] baseChunkMaterials = new Material[]{Materials.SOLID_BLOCK, Materials.CUTOUT_MIPPED_BLOCK, Materials.TRANSLUCENT_BLOCK,};
+		for (int chunkLayerIdx = 0; chunkLayerIdx < baseChunkMaterials.length; chunkLayerIdx++) {
 			int baseMaterialIdx = chunkLayerIdx * 4;
 			Material baseChunkMaterial = baseChunkMaterials[chunkLayerIdx];
 
@@ -49,58 +56,38 @@ public final class ModelUtil {
 			// shaded: true, ambientOcclusion: true
 			CHUNK_MATERIALS[baseMaterialIdx + 3] = baseChunkMaterial;
 		}
+
+		// Sheets.solidBlockSheet/cutoutBlockSheet/translucentCullBlockSheet became the "moving block"
+		// render types; the item sheets kept their own entries.
+		ITEM_MATERIALS.put(RenderTypes.solidMovingBlock(), Materials.SOLID_BLOCK);
+		ITEM_MATERIALS.put(RenderTypes.cutoutMovingBlock(), Materials.CUTOUT_BLOCK);
+		ITEM_MATERIALS.put(Sheets.cutoutBlockItemSheet(), Materials.CUTOUT_BLOCK);
+		ITEM_MATERIALS.put(RenderTypes.translucentMovingBlock(), Materials.TRANSLUCENT_ENTITY);
+		ITEM_MATERIALS.put(Sheets.translucentBlockItemSheet(), Materials.TRANSLUCENT_ENTITY);
+		ITEM_MATERIALS.put(Sheets.translucentItemSheet(), Materials.TRANSLUCENT_ENTITY);
+		ITEM_MATERIALS.put(RenderTypes.glint(), Materials.GLINT);
+		ITEM_MATERIALS.put(RenderTypes.glintTranslucent(), Materials.GLINT);
+		// entityGlintDirect no longer exists; entityGlint is the only entity glint layer.
+		ITEM_MATERIALS.put(RenderTypes.entityGlint(), Materials.GLINT_ENTITY);
 	}
 
 	private ModelUtil() {
 	}
 
-	@Nullable
-	public static Material getMaterial(RenderType chunkRenderType, boolean shaded) {
+	public static Material getMaterial(ChunkSectionLayer chunkRenderType, boolean shaded) {
 		return getMaterial(chunkRenderType, shaded, true);
 	}
 
-	@Nullable
-	public static Material getMaterial(RenderType chunkRenderType, boolean shaded, boolean ambientOcclusion) {
-		for (int chunkLayerIdx = 0; chunkLayerIdx < CHUNK_LAYERS.length; ++chunkLayerIdx) {
-			if (chunkRenderType == CHUNK_LAYERS[chunkLayerIdx]) {
-				int shadedIdx = shaded ? 1 : 0;
-				int ambientOcclusionIdx = ambientOcclusion ? 1 : 0;
+	public static Material getMaterial(ChunkSectionLayer chunkRenderType, boolean shaded, boolean ambientOcclusion) {
+		int shadedIdx = shaded ? 1 : 0;
+		int ambientOcclusionIdx = ambientOcclusion ? 1 : 0;
 
-				int materialIdx = chunkLayerIdx * 4 + shadedIdx * 2 + ambientOcclusionIdx;
-
-				return CHUNK_MATERIALS[materialIdx];
-			}
-		}
-		return null;
+		return CHUNK_MATERIALS[chunkRenderType.ordinal() * 4 + shadedIdx * 2 + ambientOcclusionIdx];
 	}
 
 	@Nullable
 	public static Material getItemMaterial(RenderType renderType) {
-		var chunkMaterial = getMaterial(renderType, true, false);
-
-		if (chunkMaterial != null) {
-			return chunkMaterial;
-		}
-
-		if (renderType == Sheets.cutoutBlockSheet()) {
-			return Materials.CUTOUT_BLOCK;
-		}
-
-		if (renderType == Sheets.solidBlockSheet()) {
-			return Materials.SOLID_BLOCK;
-		}
-
-		if (renderType == Sheets.translucentCullBlockSheet() || renderType == Sheets.translucentItemSheet()) {
-			return Materials.TRANSLUCENT_ENTITY;
-		}
-
-		if (renderType == RenderType.glint() || renderType == RenderType.glintTranslucent()) {
-			return Materials.GLINT;
-		}
-		if (renderType == RenderType.entityGlint() || renderType == RenderType.entityGlintDirect()) {
-			return Materials.GLINT_ENTITY;
-		}
-		return null;
+		return ITEM_MATERIALS.get(renderType);
 	}
 
 	public static int computeTotalVertexCount(Iterable<Mesh> meshes) {

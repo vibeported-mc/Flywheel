@@ -1,30 +1,39 @@
 package dev.engine_room.flywheel.impl.mixin.neoforge;
 
+import java.util.List;
+
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.LocalCapture;
-
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import dev.engine_room.flywheel.lib.model.baked.NeoforgeMeshEmitter;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.BlockQuadOutput;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.ModelBlockRenderer;
-import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.core.BlockPos;
-import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.client.model.data.ModelData;
 
+/**
+ * Minecraft 26.2 decides ambient occlusion once per block inside
+ * {@link ModelBlockRenderer#tesselateBlock}, then dispatches to one of two private methods. Which of
+ * the two runs is exactly the answer Flywheel needs, and catching it here means mods with custom AO
+ * hooks are handled without having to reimplement them.
+ */
 @Mixin(ModelBlockRenderer.class)
 abstract class ModelBlockRendererMixin {
-	@Inject(method = "tesselateBlock(Lnet/minecraft/world/level/BlockAndTintGetter;Lnet/minecraft/client/resources/model/BakedModel;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/core/BlockPos;Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/mojang/blaze3d/vertex/VertexConsumer;ZLnet/minecraft/util/RandomSource;JILnet/neoforged/neoforge/client/model/data/ModelData;Lnet/minecraft/client/renderer/RenderType;)V", at = @At(value = "INVOKE", target = "net/minecraft/world/level/block/state/BlockState.getOffset(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/phys/Vec3;"), locals = LocalCapture.CAPTURE_FAILSOFT, require = 0)
-	private void onTesselateBlock(BlockAndTintGetter level, BakedModel model, BlockState state, BlockPos pos, PoseStack poseStack, VertexConsumer consumer, boolean checkSides, RandomSource random, long seed, int packedOverlay, ModelData modelData, RenderType renderType, CallbackInfo ci, boolean ao) {
-		if (consumer instanceof NeoforgeMeshEmitter meshEmitter) {
-			meshEmitter.prepareForModelLayer(ao);
+	@Inject(method = "tesselateAmbientOcclusion", at = @At("HEAD"), require = 0)
+	private void flywheel$onTesselateAmbientOcclusion(BlockQuadOutput output, float x, float y, float z, List<BlockStateModelPart> parts, BlockAndTintGetter level, BlockState state, BlockPos pos, CallbackInfo ci) {
+		if (output instanceof NeoforgeMeshEmitter meshEmitter) {
+			meshEmitter.prepareForModelLayer(true);
+		}
+	}
+
+	@Inject(method = "tesselateFlat", at = @At("HEAD"), require = 0)
+	private void flywheel$onTesselateFlat(BlockQuadOutput output, float x, float y, float z, List<BlockStateModelPart> parts, BlockAndTintGetter level, BlockState state, BlockPos pos, CallbackInfo ci) {
+		if (output instanceof NeoforgeMeshEmitter meshEmitter) {
+			meshEmitter.prepareForModelLayer(false);
 		}
 	}
 }

@@ -10,13 +10,13 @@ import dev.engine_room.flywheel.api.material.Material;
 import dev.engine_room.flywheel.lib.internal.FlwLibXplat;
 import dev.engine_room.flywheel.lib.model.ModelUtil;
 import dev.engine_room.flywheel.lib.model.SimpleModel;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 
 public final class BakedModelBuilder {
-	final BakedModel bakedModel;
+	final BlockStateModel bakedModel;
 	@Nullable
 	BlockAndTintGetter level;
 	@Nullable
@@ -26,7 +26,7 @@ public final class BakedModelBuilder {
 	@Nullable
 	BlockMaterialFunction materialFunc;
 
-	public BakedModelBuilder(BakedModel bakedModel) {
+	public BakedModelBuilder(BlockStateModel bakedModel) {
 		this.bakedModel = bakedModel;
 	}
 
@@ -46,7 +46,7 @@ public final class BakedModelBuilder {
 	}
 
 	@Deprecated(forRemoval = true)
-	public BakedModelBuilder materialFunc(@Nullable BiFunction<RenderType, Boolean, @Nullable Material> materialFunc) {
+	public BakedModelBuilder materialFunc(@Nullable BiFunction<ChunkSectionLayer, Boolean, @Nullable Material> materialFunc) {
 		if (materialFunc != null) {
 			this.materialFunc = (chunkRenderType, shaded, ambientOcclusion) -> materialFunc.apply(chunkRenderType, shaded);
 		} else {

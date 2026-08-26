@@ -11,7 +11,7 @@ import dev.engine_room.flywheel.lib.visual.AbstractEntityVisual;
 import dev.engine_room.flywheel.lib.visual.SimpleDynamicVisual;
 import dev.engine_room.flywheel.lib.visual.util.InstanceRecycler;
 import dev.engine_room.vanillin.item.ItemModels;
-import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
@@ -96,7 +96,7 @@ public class ItemVisual extends AbstractEntityVisual<ItemEntity> implements Simp
 			pPoseStack.translate(f7, f8, f9);
 		}
 
-		int light = LightTexture.pack(level.getBrightness(LightLayer.BLOCK, entity.blockPosition()), level.getBrightness(LightLayer.SKY, entity.blockPosition()));
+		int light = LightCoordsUtil.pack(level.getBrightness(LightLayer.BLOCK, entity.blockPosition()), level.getBrightness(LightLayer.SKY, entity.blockPosition()));
 
 		for (int k = 0; k < j; ++k) {
 			pPoseStack.pushPose();

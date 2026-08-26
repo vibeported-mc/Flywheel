@@ -1,6 +1,5 @@
 package dev.engine_room.flywheel.impl;
 
-import java.util.Deque;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -11,11 +10,14 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.engine_room.flywheel.impl.compat.IrisCompat;
 import dev.engine_room.flywheel.impl.compat.OptifineCompat;
 import dev.engine_room.flywheel.impl.extension.PoseStackExtension;
+import dev.engine_room.flywheel.impl.mixin.EntityRendererAccessor;
 import dev.engine_room.flywheel.impl.mixin.ModelPartAccessor;
-import dev.engine_room.flywheel.impl.mixin.PoseStackAccessor;
 import dev.engine_room.flywheel.lib.internal.FlwLibLink;
 import dev.engine_room.flywheel.lib.transform.PoseTransformStack;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.geom.ModelPart;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 
 public class FlwLibLinkImpl implements FlwLibLink {
 	@Override
@@ -39,8 +41,19 @@ public class FlwLibLinkImpl implements FlwLibLink {
 	}
 
 	@Override
-	public Deque<PoseStack.Pose> getPoseStack(PoseStack stack) {
-		return ((PoseStackAccessor) stack).flywheel$getPoseStack();
+	public AABB getBoundingBoxForCulling(Entity entity) {
+		return ((EntityRendererAccessor) rendererOf(entity)).flywheel$getBoundingBoxForCulling(entity);
+	}
+
+	@Override
+	public boolean isAffectedByCulling(Entity entity) {
+		return ((EntityRendererAccessor) rendererOf(entity)).flywheel$affectedByCulling(entity);
+	}
+
+	private static Object rendererOf(Entity entity) {
+		return Minecraft.getInstance()
+				.getEntityRenderDispatcher()
+				.getRenderer(entity);
 	}
 
 	@Override

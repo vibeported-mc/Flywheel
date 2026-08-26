@@ -10,7 +10,7 @@ import dev.engine_room.flywheel.lib.visual.AbstractEntityVisual;
 import dev.engine_room.flywheel.lib.visual.SimpleDynamicVisual;
 import dev.engine_room.flywheel.lib.visual.component.ShadowComponent;
 import dev.engine_room.vanillin.item.ItemModels;
-import net.minecraft.client.Camera;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
@@ -93,7 +93,7 @@ public class ItemDisplayVisual extends AbstractEntityVisual<Display.ItemDisplay>
 				.translate((float) (pos.x - renderOrigin.getX()), (float) (pos.y - renderOrigin.getY()), (float) (pos.z - renderOrigin.getZ()));
 
 		float partialTick = ctx.partialTick();
-		Camera camera = ctx.camera();
+		CameraRenderState camera = ctx.camera();
 		switch (renderState.billboardConstraints()) {
 		case FIXED:
 			instance.pose.rotateYXZ(-0.017453292F * entityYRot(entity, partialTick), ((float) Math.PI / 180F) * entityXRot(entity, partialTick), 0.0F);
@@ -116,12 +116,12 @@ public class ItemDisplayVisual extends AbstractEntityVisual<Display.ItemDisplay>
 				.setChanged();
 	}
 
-	private static float cameraYrot(Camera camera) {
-		return camera.getYRot() - 180.0F;
+	private static float cameraYrot(CameraRenderState camera) {
+		return camera.yRot - 180.0F;
 	}
 
-	private static float cameraXRot(Camera camera) {
-		return -camera.getXRot();
+	private static float cameraXRot(CameraRenderState camera) {
+		return -camera.xRot;
 	}
 
 	private static float entityYRot(Entity entity, float partialTick) {

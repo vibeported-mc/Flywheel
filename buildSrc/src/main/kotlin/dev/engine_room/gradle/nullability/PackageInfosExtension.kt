@@ -28,7 +28,9 @@ open class PackageInfosExtension(private val project: Project) {
         }
         sourceSet.java.srcDir(task)
 
-        project.tasks.named("ideaSyncTask").configure {
+        // Loom provided "ideaSyncTask"; under ModDevGradle the IDE sync hook is registered by the
+        // consuming build script via neoForge.ideSyncTask(...), so only wire it up if it exists.
+        project.tasks.matching { it.name == "ideaSyncTask" }.configureEach {
             finalizedBy(task)
         }
 

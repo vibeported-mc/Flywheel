@@ -4,13 +4,14 @@ import org.joml.Math;
 import org.joml.Matrix4f;
 import org.joml.Vector2f;
 import org.joml.Vector3f;
+import org.joml.Vector3fc;
 import org.lwjgl.system.MemoryUtil;
 
 import dev.engine_room.flywheel.api.backend.RenderContext;
 import dev.engine_room.flywheel.api.visualization.VisualizationManager;
 import dev.engine_room.flywheel.backend.engine.indirect.DepthPyramid;
-import dev.engine_room.flywheel.backend.mixin.LevelRendererAccessor;
-import net.minecraft.Util;
+import net.minecraft.util.Util;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
@@ -35,6 +36,8 @@ public final class FrameUniforms extends UniformWriter {
 
 	private static final Vector3f CAMERA_POS = new Vector3f();
 	private static final Vector3f CAMERA_POS_PREV = new Vector3f();
+	// Camera derives its look direction by rotating this by the camera orientation.
+	private static final Vector3fc CAMERA_FORWARDS = new Vector3f(0.0f, 0.0f, -1.0f);
 	private static final Vector3f CAMERA_LOOK = new Vector3f();
 	private static final Vector3f CAMERA_LOOK_PREV = new Vector3f();
 	private static final Vector2f CAMERA_ROT = new Vector2f();
@@ -69,7 +72,7 @@ public final class FrameUniforms extends UniformWriter {
 		Vec3i renderOrigin = VisualizationManager.getOrThrow(context.level())
 				.renderOrigin();
 		var camera = context.camera();
-		Vec3 cameraPos = camera.getPosition();
+		Vec3 cameraPos = camera.pos;
 		var camX = (float) (cameraPos.x - renderOrigin.getX());
 		var camY = (float) (cameraPos.y - renderOrigin.getY());
 		var camZ = (float) (cameraPos.z - renderOrigin.getZ());
@@ -81,8 +84,8 @@ public final class FrameUniforms extends UniformWriter {
 		VIEW_PROJECTION.translate(-camX, -camY, -camZ);
 
 		CAMERA_POS.set(camX, camY, camZ);
-		CAMERA_LOOK.set(camera.getLookVector());
-		CAMERA_ROT.set(camera.getXRot(), camera.getYRot());
+		CAMERA_LOOK.set(CAMERA_FORWARDS).rotate(camera.orientation);
+		CAMERA_ROT.set(camera.xRot, camera.yRot);
 
 		if (firstWrite) {
 			setPrev();
@@ -95,7 +98,7 @@ public final class FrameUniforms extends UniformWriter {
 
 		ptr += 96;
 
-		ptr = writeCullData(ptr);
+		ptr = writeCullData(ptr, camera);
 
 		ptr = writeMatrices(ptr);
 
@@ -109,11 +112,11 @@ public final class FrameUniforms extends UniformWriter {
 		ptr = writeFloat(ptr, (float) window.getWidth() / (float) window.getHeight());
 		// default line width: net.minecraft.client.renderer.RenderStateShard.LineStateShard
 		ptr = writeFloat(ptr, Math.max(2.5F, (float) window.getWidth() / 1920.0F * 2.5F));
-		ptr = writeFloat(ptr, Minecraft.getInstance().gameRenderer.getDepthFar());
+		ptr = writeFloat(ptr, camera.depthFar);
 
 		ptr = writeTime(ptr, context);
 
-		ptr = writeCameraIn(ptr, camera);
+		ptr = writeCameraIn(ptr, context.level(), camera);
 
 		ptr = writeInt(ptr, debugMode);
 
@@ -162,7 +165,7 @@ public final class FrameUniforms extends UniformWriter {
 	}
 
 	private static long writeTime(long ptr, RenderContext context) {
-		int ticks = ((LevelRendererAccessor) context.renderer()).flywheel$getTicks();
+		int ticks = (int) context.levelRenderState().gameTime;
 		float partialTick = context.partialTick();
 		float renderTicks = ticks + partialTick;
 		float renderSeconds = renderTicks / 20f;
@@ -178,29 +181,28 @@ public final class FrameUniforms extends UniformWriter {
 		return ptr;
 	}
 
-	private static long writeCameraIn(long ptr, Camera camera) {
-		if (!camera.isInitialized()) {
+	private static long writeCameraIn(long ptr, Level level, CameraRenderState camera) {
+		if (!camera.initialized) {
 			ptr = writeInt(ptr, 0);
 			ptr = writeInt(ptr, 0);
 			return ptr;
 		}
 
-		Level level = camera.getEntity().level();
-		BlockPos blockPos = camera.getBlockPosition();
-		Vec3 cameraPos = camera.getPosition();
+		BlockPos blockPos = camera.blockPos;
+		Vec3 cameraPos = camera.pos;
 		return writeInFluidAndBlock(ptr, level, blockPos, cameraPos);
 	}
 
-	private static long writeCullData(long ptr) {
+	private static long writeCullData(long ptr, CameraRenderState camera) {
 		var mc = Minecraft.getInstance();
-		var mainRenderTarget = mc.getMainRenderTarget();
+		var mainRenderTarget = mc.gameRenderer.mainRenderTarget();
 
 		int pyramidWidth = DepthPyramid.mip0Size(mainRenderTarget.width);
 		int pyramidHeight = DepthPyramid.mip0Size(mainRenderTarget.height);
 		int pyramidDepth = DepthPyramid.getImageMipLevels(pyramidWidth, pyramidHeight);
 
-		ptr = writeFloat(ptr, GameRenderer.PROJECTION_Z_NEAR); // zNear
-		ptr = writeFloat(ptr, mc.gameRenderer.getDepthFar()); // zFar
+		ptr = writeFloat(ptr, Camera.PROJECTION_Z_NEAR); // zNear
+		ptr = writeFloat(ptr, camera.depthFar); // zFar
 		ptr = writeFloat(ptr, PROJECTION.m00()); // P00
 		ptr = writeFloat(ptr, PROJECTION.m11()); // P11
 		ptr = writeFloat(ptr, pyramidWidth); // pyramidWidth

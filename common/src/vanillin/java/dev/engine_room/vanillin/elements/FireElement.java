@@ -21,7 +21,7 @@ import dev.engine_room.flywheel.lib.util.RendererReloadCache;
 import dev.engine_room.flywheel.lib.visual.AbstractVisual;
 import dev.engine_room.flywheel.lib.visual.SimpleDynamicVisual;
 import dev.engine_room.flywheel.lib.visual.util.SmartRecycler;
-import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.resources.model.ModelBakery;
 import net.minecraft.util.Mth;
@@ -38,7 +38,7 @@ public final class FireElement extends AbstractVisual implements SimpleDynamicVi
 	// Parameterize by the material instead of the sprite
 	// because Material#sprite is a surprisingly heavy operation
 	// and because sprites are invalidated after a resource reload.
-	private static final RendererReloadCache<net.minecraft.client.resources.model.Material, Model> FIRE_MODELS = new RendererReloadCache<>(texture -> {
+	private static final RendererReloadCache<net.minecraft.client.resources.model.sprite.Material, Model> FIRE_MODELS = new RendererReloadCache<>(texture -> {
 		return new SingleMeshModel(new FireMesh(texture.sprite()), FIRE_MATERIAL);
 	});
 
@@ -59,7 +59,7 @@ public final class FireElement extends AbstractVisual implements SimpleDynamicVi
 		TransformedInstance instance = visualizationContext.instancerProvider()
 				.instancer(InstanceTypes.TRANSFORMED, model)
 				.createInstance();
-		instance.light(LightTexture.FULL_BLOCK);
+		instance.light(LightCoordsUtil.pack(15, 0));
 		instance.setChanged();
 		return instance;
 	}
@@ -157,7 +157,7 @@ public final class FireElement extends AbstractVisual implements SimpleDynamicVi
 			vertexList.b(i, 1);
 			vertexList.u(i, u);
 			vertexList.v(i, v);
-			vertexList.light(i, LightTexture.FULL_BLOCK);
+			vertexList.light(i, LightCoordsUtil.pack(15, 0));
 			vertexList.normalX(i, 0);
 			vertexList.normalY(i, 1);
 			vertexList.normalZ(i, 0);

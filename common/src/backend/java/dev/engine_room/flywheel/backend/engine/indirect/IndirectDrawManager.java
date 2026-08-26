@@ -290,7 +290,7 @@ public class IndirectDrawManager extends DrawManager<IndirectInstancer<?>> {
 	@Override
 	public void triggerFallback() {
 		IndirectPrograms.kill();
-		Minecraft.getInstance().levelRenderer.allChanged();
+		Minecraft.getInstance().levelExtractor.allChanged();
 	}
 
 	@Override
