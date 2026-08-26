@@ -4,7 +4,7 @@ import static org.lwjgl.opengl.GL13.GL_TEXTURE0;
 
 import com.mojang.blaze3d.opengl.GlStateManager;
 
-import dev.engine_room.flywheel.backend.mixin.GlStateManagerMixin;
+import dev.engine_room.flywheel.backend.gl.GlStateTracker;
 
 public enum GlTextureUnit {
 	T0(0),
@@ -55,7 +55,7 @@ public enum GlTextureUnit {
 	}
 
 	public static GlTextureUnit getActive() {
-		return fromGlEnum(GlStateManagerMixin.flywheel$getActiveTexture() + GL_TEXTURE0);
+		return fromGlEnum(GlStateTracker.getActiveTexture());
 	}
 
 	public static GlTextureUnit fromGlEnum(int glEnum) {

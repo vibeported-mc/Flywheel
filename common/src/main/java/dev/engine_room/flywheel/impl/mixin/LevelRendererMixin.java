@@ -17,6 +17,7 @@ import dev.engine_room.flywheel.impl.FlwImplXplat;
 import dev.engine_room.flywheel.impl.event.RenderContextHolder;
 import dev.engine_room.flywheel.impl.event.RenderContextImpl;
 import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.RenderBuffers;
@@ -26,10 +27,6 @@ import org.joml.Vector4f;
 
 @Mixin(value = LevelRenderer.class, priority = 1001) // Higher priority to go after Sodium
 abstract class LevelRendererMixin {
-	@Shadow
-	@Nullable
-	private ClientLevel level;
-
 	@Shadow
 	@Final
 	private RenderBuffers renderBuffers;
@@ -44,6 +41,7 @@ abstract class LevelRendererMixin {
 	 */
 	@Inject(method = "render", at = @At("HEAD"))
 	private void flywheel$beginRender(GraphicsResourceAllocator resourceAllocator, DeltaTracker deltaTracker, boolean renderOutline, CameraRenderState cameraState, Matrix4fc modelViewMatrix, GpuBufferSlice terrainFog, Vector4f fogColor, boolean shouldRenderSky, CallbackInfo ci) {
+		ClientLevel level = Minecraft.getInstance().level;
 		if (level == null) {
 			return;
 		}
@@ -69,6 +67,7 @@ abstract class LevelRendererMixin {
 	 */
 	@Inject(method = "resetLevelRenderData", at = @At("RETURN"))
 	private void flywheel$reload(CallbackInfo ci) {
+		ClientLevel level = Minecraft.getInstance().level;
 		if (level != null) {
 			FlwImplXplat.INSTANCE.dispatchReloadLevelRendererEvent(level);
 		}

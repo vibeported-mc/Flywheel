@@ -4,8 +4,6 @@ import org.lwjgl.opengl.GL13;
 
 import com.mojang.blaze3d.opengl.GlStateManager;
 
-import dev.engine_room.flywheel.backend.mixin.GlStateManagerMixin;
-
 import dev.engine_room.flywheel.backend.gl.buffer.GlBufferType;
 
 /**
@@ -15,6 +13,7 @@ public class GlStateTracker {
 	private static final int[] BUFFERS = new int[GlBufferType.values().length];
 	private static int vao;
 	private static int program;
+	private static int activeTexture = GL13.GL_TEXTURE0;
 
 	public static int getBuffer(GlBufferType type) {
 		return BUFFERS[type.ordinal()];
@@ -26,6 +25,10 @@ public class GlStateTracker {
 
 	public static int getProgram() {
 		return program;
+	}
+
+	public static int getActiveTexture() {
+		return activeTexture;
 	}
 
 	public static void _setBuffer(GlBufferType type, int id) {
@@ -40,8 +43,12 @@ public class GlStateTracker {
 		program = id;
 	}
 
+	public static void _setActiveTexture(int texture) {
+		activeTexture = texture;
+	}
+
 	public static State getRestoreState() {
-		return new State(BUFFERS.clone(), vao, program, GlStateManagerMixin.flywheel$getActiveTexture() + GL13.GL_TEXTURE0);
+		return new State(BUFFERS.clone(), vao, program, activeTexture);
 	}
 
 	public static void bindVao(int vao) {

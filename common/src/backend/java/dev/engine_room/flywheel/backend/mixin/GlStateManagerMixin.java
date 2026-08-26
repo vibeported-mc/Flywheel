@@ -1,7 +1,6 @@
 package dev.engine_room.flywheel.backend.mixin;
 
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -12,12 +11,7 @@ import dev.engine_room.flywheel.backend.gl.GlStateTracker;
 import dev.engine_room.flywheel.backend.gl.buffer.GlBufferType;
 
 @Mixin(value = GlStateManager.class, remap = false)
-public abstract class GlStateManagerMixin {
-	@Accessor("activeTexture")
-	public static int flywheel$getActiveTexture() {
-		throw new AssertionError();
-	}
-
+abstract class GlStateManagerMixin {
 	@Inject(method = "_glBindBuffer(II)V", at = @At("RETURN"))
 	private static void flywheel$onBindBuffer(int target, int buffer, CallbackInfo ci) {
 		GlStateTracker._setBuffer(GlBufferType.fromTarget(target), buffer);
@@ -31,6 +25,11 @@ public abstract class GlStateManagerMixin {
 	@Inject(method = "_glUseProgram(I)V", at = @At("RETURN"))
 	private static void flywheel$onUseProgram(int program, CallbackInfo ci) {
 		GlStateTracker._setProgram(program);
+	}
+
+	@Inject(method = "_activeTexture(I)V", at = @At("RETURN"))
+	private static void flywheel$onActiveTexture(int texture, CallbackInfo ci) {
+		GlStateTracker._setActiveTexture(texture);
 	}
 
 }
