@@ -30,7 +30,9 @@ uvec2 get_xy() {
     return uvec2(x, y);
 }
 
+// Minecraft 26.2's depth buffer is reversed - the near plane writes 1 and the far plane writes 0 -
+// so the conservative occluder of a group of texels, the furthest one, is now their minimum.
 float reduce_4(vec4 v) {
-    return max(max(v.x, v.y), max(v.z, v.w));
+    return min(min(v.x, v.y), min(v.z, v.w));
 }
 

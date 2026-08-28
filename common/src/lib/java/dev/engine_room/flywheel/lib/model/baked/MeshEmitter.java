@@ -2,7 +2,9 @@ package dev.engine_room.flywheel.lib.model.baked;
 
 import java.util.Arrays;
 
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.UnknownNullability;
+import org.joml.Matrix4fc;
 
 import com.google.common.collect.ImmutableList;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -28,6 +30,12 @@ class MeshEmitter {
 	@UnknownNullability
 	BlockMaterialFunction blockMaterialFunction;
 
+	/**
+	 * The transform the caller asked for, applied to the finished vertices.
+	 */
+	@Nullable
+	private Matrix4fc transform;
+
 	private int currentIndex = 0;
 
 	MeshEmitter(ByteBufferBuilderStack byteBufferBuilderStack, ChunkSectionLayer renderType) {
@@ -35,8 +43,9 @@ class MeshEmitter {
 		this.renderType = renderType;
 	}
 
-	public void prepare(BlockMaterialFunction blockMaterialFunction) {
+	public void prepare(BlockMaterialFunction blockMaterialFunction, @Nullable Matrix4fc transform) {
 		this.blockMaterialFunction = blockMaterialFunction;
+		this.transform = transform;
 	}
 
 	public void prepareForBlock() {
@@ -53,7 +62,7 @@ class MeshEmitter {
 
 			if (renderedBuffer != null) {
 				Material material = materials[index];
-				Mesh mesh = MeshHelper.blockVerticesToMesh(renderedBuffer, "source=ModelBuilder" + ",material=" + material);
+				Mesh mesh = MeshHelper.blockVerticesToMesh(renderedBuffer, transform, "source=ModelBuilder" + ",material=" + material);
 				out.add(new Model.ConfiguredMesh(material, mesh));
 				renderedBuffer.close();
 			}
@@ -66,6 +75,7 @@ class MeshEmitter {
 		currentIndex = 0;
 		numBufferBuildersPopulated = 0;
 		blockMaterialFunction = null;
+		transform = null;
 	}
 
 	public BufferBuilder getBuffer(Material material) {

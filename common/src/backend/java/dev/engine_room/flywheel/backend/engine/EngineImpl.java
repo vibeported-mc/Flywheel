@@ -17,6 +17,7 @@ import dev.engine_room.flywheel.backend.engine.embed.EmbeddedEnvironment;
 import dev.engine_room.flywheel.backend.engine.embed.Environment;
 import dev.engine_room.flywheel.backend.engine.embed.EnvironmentStorage;
 import dev.engine_room.flywheel.backend.engine.uniform.Uniforms;
+import dev.engine_room.flywheel.backend.gl.GlRenderTargets;
 import dev.engine_room.flywheel.backend.gl.GlStateTracker;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
@@ -90,7 +91,11 @@ public class EngineImpl implements Engine {
 		try (var state = GlStateTracker.getRestoreState()) {
 			Uniforms.update(context);
 			environmentStorage.flush();
+			// The back buffer is what 26.2 leaves bound between render passes, so the level's target
+			// has to be put back before any of this lands in it.
+			GlRenderTargets.bind(GlRenderTargets.main());
 			drawManager.render(lightStorage, environmentStorage);
+			GlRenderTargets.unbind();
 		} catch (Exception e) {
 			FlwBackend.LOGGER.error("Falling back", e);
 			triggerFallback();
@@ -100,7 +105,9 @@ public class EngineImpl implements Engine {
 	@Override
 	public void renderCrumbling(RenderContext context, List<CrumblingBlock> crumblingBlocks) {
 		try (var state = GlStateTracker.getRestoreState()) {
+			GlRenderTargets.bind(GlRenderTargets.main());
 			drawManager.renderCrumbling(crumblingBlocks);
+			GlRenderTargets.unbind();
 		} catch (Exception e) {
 			FlwBackend.LOGGER.error("Falling back", e);
 			triggerFallback();

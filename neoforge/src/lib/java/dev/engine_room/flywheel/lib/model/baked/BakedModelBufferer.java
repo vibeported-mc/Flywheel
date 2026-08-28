@@ -35,16 +35,15 @@ final class BakedModelBufferer {
 		MeshEmitterManager<MeshEmitter> emitters = objects.emitters;
 		NeoforgeMeshEmitter output = objects.output;
 
-		emitters.prepare(blockMaterialFunction);
+		// tesselateBlock takes a translation where it used to take a PoseStack, so it can only be
+		// given the offset; the rest of the caller's transform is applied to the finished vertices.
+		emitters.prepare(blockMaterialFunction, poseStack.last()
+				.pose());
 
 		ModelBlockRenderer blockRenderer = newBlockRenderer();
 		output.prepareForModelLayer(useAmbientOcclusion(level, pos, state));
 
-		// tesselateBlock bakes the block position into the emitted vertices rather than reading a
-		// PoseStack, so the caller's transform is applied by feeding it the translation directly.
-		var pose = poseStack.last()
-				.pose();
-		blockRenderer.tesselateBlock(output, pose.m30(), pose.m31(), pose.m32(), level, pos, state, model, state.getSeed(pos));
+		blockRenderer.tesselateBlock(output, 0, 0, 0, level, pos, state, model, state.getSeed(pos));
 
 		return emitters.end();
 	}
@@ -59,7 +58,9 @@ final class BakedModelBufferer {
 		TransformingVertexConsumer transformingWrapper = objects.transformingWrapper;
 		PoseStack fluidPoseStack = poseStack;
 
-		emitters.prepare(blockMaterialFunction);
+		// The fluid path below transforms its own vertices through TransformingVertexConsumer, so the
+		// blocks keep taking the origin as a plain offset rather than transforming twice.
+		emitters.prepare(blockMaterialFunction, null);
 
 		ModelBlockRenderer blockRenderer = newBlockRenderer();
 		var modelManager = Minecraft.getInstance()

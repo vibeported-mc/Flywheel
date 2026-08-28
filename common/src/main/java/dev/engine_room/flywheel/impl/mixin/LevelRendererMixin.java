@@ -46,7 +46,7 @@ abstract class LevelRendererMixin {
 			return;
 		}
 
-		RenderContextImpl context = RenderContextImpl.create((LevelRenderer) (Object) this, level, levelRenderState, renderBuffers, modelViewMatrix, cameraState.projectionMatrix, cameraState, deltaTracker.getGameTimeDeltaPartialTick(false));
+		RenderContextImpl context = RenderContextImpl.create((LevelRenderer) (Object) this, level, levelRenderState, renderBuffers, modelViewMatrix, RenderContextHolder.projectionOr(cameraState.projectionMatrix), cameraState, deltaTracker.getGameTimeDeltaPartialTick(false));
 		RenderContextHolder.set(context);
 
 		VisualizationManager manager = VisualizationManager.get(level);

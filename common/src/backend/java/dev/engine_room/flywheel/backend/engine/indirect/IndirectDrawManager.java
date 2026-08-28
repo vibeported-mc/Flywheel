@@ -29,6 +29,7 @@ import dev.engine_room.flywheel.backend.engine.MeshPool;
 import dev.engine_room.flywheel.backend.engine.TextureBinder;
 import dev.engine_room.flywheel.backend.engine.embed.EnvironmentStorage;
 import dev.engine_room.flywheel.backend.engine.uniform.Uniforms;
+import dev.engine_room.flywheel.backend.gl.GlRenderTargets;
 import dev.engine_room.flywheel.backend.gl.array.GlVertexArray;
 import dev.engine_room.flywheel.backend.gl.buffer.GlBuffer;
 import dev.engine_room.flywheel.backend.gl.buffer.GlBufferType;
@@ -114,6 +115,12 @@ public class IndirectDrawManager extends DrawManager<IndirectInstancer<?>> {
 
 		stagingBuffer.flush();
 
+		// The pyramid samples the depth texture of the target the level is drawn into, which is the
+		// target bound for our own draws. Reading a texture while it is attached to the bound
+		// framebuffer is undefined, so the target is let go for the culling work - which is all
+		// compute and wants no framebuffer at all - and taken back below to draw.
+		GlRenderTargets.unbind();
+
 		depthPyramid.generate();
 
 		// We could probably save some driver calls here when there are
@@ -139,6 +146,8 @@ public class IndirectDrawManager extends DrawManager<IndirectInstancer<?>> {
 		}
 
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+		GlRenderTargets.bind(GlRenderTargets.main());
 
 		TextureBinder.bindLightAndOverlay();
 

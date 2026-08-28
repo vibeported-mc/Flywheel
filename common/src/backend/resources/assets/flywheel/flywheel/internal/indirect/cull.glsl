@@ -109,11 +109,15 @@ bool _flw_isVisible(uint instanceIndex, uint modelIndex) {
             float depth10 = texelFetch(_flw_depthPyramid, bounds.zy, level).r;
             float depth00 = texelFetch(_flw_depthPyramid, bounds.xy, level).r;
 
-            float depth = max(max(depth00, depth01), max(depth10, depth11));
+            // The depth buffer is reversed in Minecraft 26.2: the near plane writes 1 and the far
+            // plane writes 0. The conservative occluder is still the furthest of the four texels,
+            // which is now their minimum, the sphere's own depth is one minus what it used to be,
+            // and it is in front of the occluder when its depth is the greater of the two.
+            float depth = min(min(depth00, depth01), min(depth10, depth11));
 
-            float depthSphere = 1. + _flw_cullData.znear / (center.z + radius);
+            float depthSphere = -_flw_cullData.znear / (center.z + radius);
 
-            isVisible = isVisible && depthSphere <= depth;
+            isVisible = isVisible && depthSphere >= depth;
         }
     }
 

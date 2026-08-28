@@ -203,8 +203,12 @@ public final class FrameUniforms extends UniformWriter {
 
 		ptr = writeFloat(ptr, Camera.PROJECTION_Z_NEAR); // zNear
 		ptr = writeFloat(ptr, camera.depthFar); // zFar
-		ptr = writeFloat(ptr, PROJECTION.m00()); // P00
-		ptr = writeFloat(ptr, PROJECTION.m11()); // P11
+		// projectSphere reads these two as the bare perspective scale factors, so they have to come
+		// from the camera's own projection. The matrix the level is drawn with has view bobbing
+		// multiplied into it, which is a rotation applied on the view side and leaves m00 and m11
+		// carrying part of it - fine for the frustum planes above, wrong for a screen-space AABB.
+		ptr = writeFloat(ptr, camera.projectionMatrix.m00()); // P00
+		ptr = writeFloat(ptr, camera.projectionMatrix.m11()); // P11
 		ptr = writeFloat(ptr, pyramidWidth); // pyramidWidth
 		ptr = writeFloat(ptr, pyramidHeight); // pyramidHeight
 		ptr = writeInt(ptr, pyramidDepth - 1); // pyramidLevels

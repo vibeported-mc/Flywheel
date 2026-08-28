@@ -107,16 +107,24 @@ public final class MaterialRenderState {
 		}
 	}
 
+	/**
+	 * Minecraft 26.2 draws the level into a reversed depth buffer: the projection is built with its
+	 * near and far swapped under {@code GL_ZERO_TO_ONE} clip control, so the near plane writes 1 and
+	 * the far plane writes 0, and the buffer is cleared to 0. {@link DepthTest} names the comparison
+	 * the caller means - {@code LESS} is "nearer than" - so every ordered test is issued as its
+	 * mirror image, the same swap vanilla made when its own pipelines moved to
+	 * {@code GREATER_THAN_OR_EQUAL}. The unordered tests read the same either way.
+	 */
 	private static void setupDepthTest(DepthTest depthTest) {
 		switch (depthTest) {
 		case OFF -> GlStateManager._disableDepthTest();
 		case NEVER -> enableDepthFunc(GL11.GL_NEVER);
-		case LESS -> enableDepthFunc(GL11.GL_LESS);
+		case LESS -> enableDepthFunc(GL11.GL_GREATER);
 		case EQUAL -> enableDepthFunc(GL11.GL_EQUAL);
-		case LEQUAL -> enableDepthFunc(GL11.GL_LEQUAL);
-		case GREATER -> enableDepthFunc(GL11.GL_GREATER);
+		case LEQUAL -> enableDepthFunc(GL11.GL_GEQUAL);
+		case GREATER -> enableDepthFunc(GL11.GL_LESS);
 		case NOTEQUAL -> enableDepthFunc(GL11.GL_NOTEQUAL);
-		case GEQUAL -> enableDepthFunc(GL11.GL_GEQUAL);
+		case GEQUAL -> enableDepthFunc(GL11.GL_LEQUAL);
 		case ALWAYS -> enableDepthFunc(GL11.GL_ALWAYS);
 		}
 	}
@@ -177,7 +185,7 @@ public final class MaterialRenderState {
 
 	private static void resetDepthTest() {
 		GlStateManager._disableDepthTest();
-		GlStateManager._depthFunc(GL11.GL_LEQUAL);
+		GlStateManager._depthFunc(GL11.GL_GEQUAL);
 	}
 
 	private static void resetTransparency() {

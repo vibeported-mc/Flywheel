@@ -1,11 +1,8 @@
 package dev.engine_room.flywheel.backend.engine.indirect;
 
-import java.util.Collections;
 
-import com.mojang.blaze3d.opengl.GlDevice;
 import com.mojang.blaze3d.opengl.GlSampler;
 import com.mojang.blaze3d.opengl.GlTexture;
-import dev.engine_room.flywheel.backend.mixin.GpuDeviceAccessor;
 import dev.engine_room.flywheel.backend.mixin.LevelRendererAccessor;
 import org.lwjgl.opengl.GL33C;
 
@@ -17,12 +14,12 @@ import org.lwjgl.opengl.GL46;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.opengl.GlStateManager;
-import com.mojang.blaze3d.systems.RenderSystem;
 
 import dev.engine_room.flywheel.backend.NoiseTextures;
 import dev.engine_room.flywheel.backend.Samplers;
 import dev.engine_room.flywheel.backend.compile.OitPrograms;
 import dev.engine_room.flywheel.backend.gl.GlCompat;
+import dev.engine_room.flywheel.backend.gl.GlRenderTargets;
 import dev.engine_room.flywheel.backend.gl.GlTextureUnit;
 import net.minecraft.client.Minecraft;
 
@@ -340,13 +337,7 @@ public class OitFramebuffer {
 		return ((GlTexture) target.getDepthTexture()).glId();
 	}
 
-	/**
-	 * RenderTarget lost its bind methods in 26.2; the OpenGL backend caches an FBO per attachment set.
-	 */
 	private static void bindRenderTarget(RenderTarget target) {
-		GlDevice device = (GlDevice) ((GpuDeviceAccessor) RenderSystem.getDevice()).flywheel$backend();
-		int fbo = device.frameBufferCache()
-				.getFbo(device.directStateAccess(), Collections.singletonList((GlTexture) target.getColorTexture()), (GlTexture) target.getDepthTexture());
-		GlStateManager._glBindFramebuffer(GL32.GL_FRAMEBUFFER, fbo);
+		GlRenderTargets.bind(target);
 	}
 }
