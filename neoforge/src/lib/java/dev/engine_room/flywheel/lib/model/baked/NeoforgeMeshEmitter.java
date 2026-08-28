@@ -3,6 +3,7 @@ package dev.engine_room.flywheel.lib.model.baked;
 import org.jetbrains.annotations.ApiStatus;
 
 import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.QuadInstance;
 
 import net.minecraft.client.renderer.block.BlockQuadOutput;
@@ -20,6 +21,9 @@ public class NeoforgeMeshEmitter implements BlockQuadOutput {
 
 	private boolean defaultAo;
 
+	@org.jetbrains.annotations.UnknownNullability
+	private PoseStack poseStack;
+
 	NeoforgeMeshEmitter(MeshEmitterManager<MeshEmitter> emitters) {
 		this.emitters = emitters;
 	}
@@ -34,6 +38,16 @@ public class NeoforgeMeshEmitter implements BlockQuadOutput {
 		this.defaultAo = defaultAo;
 	}
 
+	void setPoseStack(PoseStack poseStack) {
+		this.poseStack = poseStack;
+	}
+
+	/**
+	 * Quads go in through {@code putBakedQuad} rather than {@code putBlockBakedQuad}: the block form
+	 * takes a bare translation and writes neither a normal nor an overlay, while this one applies the
+	 * caller's whole pose and carries the quad's own baked normals - which is what models loaded from
+	 * OBJ actually supply.
+	 */
 	@Override
 	public void put(float x, float y, float z, BakedQuad quad, QuadInstance instance) {
 		BakedQuad.MaterialInfo materialInfo = quad.materialInfo();
@@ -44,8 +58,17 @@ public class NeoforgeMeshEmitter implements BlockQuadOutput {
 
 		BufferBuilder bufferBuilder = emitters.getBuffer(materialInfo.layer(), materialInfo.shade(), ao);
 
-		if (bufferBuilder != null) {
-			bufferBuilder.putBlockBakedQuad(x, y, z, quad, instance);
+		if (bufferBuilder == null) {
+			return;
+		}
+
+		if (x != 0.0F || y != 0.0F || z != 0.0F) {
+			poseStack.pushPose();
+			poseStack.translate(x, y, z);
+			bufferBuilder.putBakedQuad(poseStack.last(), quad, instance);
+			poseStack.popPose();
+		} else {
+			bufferBuilder.putBakedQuad(poseStack.last(), quad, instance);
 		}
 	}
 }

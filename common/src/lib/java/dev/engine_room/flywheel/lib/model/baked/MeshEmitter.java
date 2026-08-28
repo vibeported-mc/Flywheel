@@ -4,11 +4,12 @@ import java.util.Arrays;
 
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.UnknownNullability;
-import org.joml.Matrix4fc;
 
 import com.google.common.collect.ImmutableList;
 import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 
 import dev.engine_room.flywheel.api.material.Material;
 import dev.engine_room.flywheel.api.model.Mesh;
@@ -30,12 +31,6 @@ class MeshEmitter {
 	@UnknownNullability
 	BlockMaterialFunction blockMaterialFunction;
 
-	/**
-	 * The transform the caller asked for, applied to the finished vertices.
-	 */
-	@Nullable
-	private Matrix4fc transform;
-
 	private int currentIndex = 0;
 
 	MeshEmitter(ByteBufferBuilderStack byteBufferBuilderStack, ChunkSectionLayer renderType) {
@@ -43,9 +38,8 @@ class MeshEmitter {
 		this.renderType = renderType;
 	}
 
-	public void prepare(BlockMaterialFunction blockMaterialFunction, @Nullable Matrix4fc transform) {
+	public void prepare(BlockMaterialFunction blockMaterialFunction) {
 		this.blockMaterialFunction = blockMaterialFunction;
-		this.transform = transform;
 	}
 
 	public void prepareForBlock() {
@@ -62,7 +56,7 @@ class MeshEmitter {
 
 			if (renderedBuffer != null) {
 				Material material = materials[index];
-				Mesh mesh = MeshHelper.blockVerticesToMesh(renderedBuffer, transform, "source=ModelBuilder" + ",material=" + material);
+				Mesh mesh = MeshHelper.blockVerticesToMesh(renderedBuffer, "source=ModelBuilder" + ",material=" + material);
 				out.add(new Model.ConfiguredMesh(material, mesh));
 				renderedBuffer.close();
 			}
@@ -75,7 +69,6 @@ class MeshEmitter {
 		currentIndex = 0;
 		numBufferBuildersPopulated = 0;
 		blockMaterialFunction = null;
-		transform = null;
 	}
 
 	public BufferBuilder getBuffer(Material material) {
@@ -99,9 +92,9 @@ class MeshEmitter {
 
 		ByteBufferBuilder byteBufferBuilder = byteBufferBuilderStack.nextOrCreate();
 
-		// Trust that the ChunkSectionLayer topology/format don't change out from underneath us.
-		BufferBuilder bufferBuilder = new BufferBuilder(byteBufferBuilder, renderType.pipeline()
-				.getPrimitiveTopology(), renderType.vertexFormat());
+		// Buffered through the entity format on purpose: 26.2's block format has neither a normal nor
+		// an overlay, and Flywheel's own vertex layout wants both.
+		BufferBuilder bufferBuilder = new BufferBuilder(byteBufferBuilder, PrimitiveTopology.QUADS, DefaultVertexFormat.ENTITY);
 
 		// currentIndex == numBufferBuildersPopulated here.
 		materials[currentIndex] = material;

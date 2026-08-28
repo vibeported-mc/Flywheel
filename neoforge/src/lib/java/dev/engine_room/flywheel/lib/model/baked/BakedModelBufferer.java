@@ -35,14 +35,14 @@ final class BakedModelBufferer {
 		MeshEmitterManager<MeshEmitter> emitters = objects.emitters;
 		NeoforgeMeshEmitter output = objects.output;
 
-		// tesselateBlock takes a translation where it used to take a PoseStack, so it can only be
-		// given the offset; the rest of the caller's transform is applied to the finished vertices.
-		emitters.prepare(blockMaterialFunction, poseStack.last()
-				.pose());
+		emitters.prepare(blockMaterialFunction);
+		output.setPoseStack(poseStack);
 
 		ModelBlockRenderer blockRenderer = newBlockRenderer();
 		output.prepareForModelLayer(useAmbientOcclusion(level, pos, state));
 
+		// The caller's transform rides on the pose the emitter writes each quad through, so the
+		// tesselator itself is given no offset at all.
 		blockRenderer.tesselateBlock(output, 0, 0, 0, level, pos, state, model, state.getSeed(pos));
 
 		return emitters.end();
@@ -58,9 +58,8 @@ final class BakedModelBufferer {
 		TransformingVertexConsumer transformingWrapper = objects.transformingWrapper;
 		PoseStack fluidPoseStack = poseStack;
 
-		// The fluid path below transforms its own vertices through TransformingVertexConsumer, so the
-		// blocks keep taking the origin as a plain offset rather than transforming twice.
-		emitters.prepare(blockMaterialFunction, null);
+		emitters.prepare(blockMaterialFunction);
+		output.setPoseStack(poseStack);
 
 		ModelBlockRenderer blockRenderer = newBlockRenderer();
 		var modelManager = Minecraft.getInstance()
@@ -69,11 +68,6 @@ final class BakedModelBufferer {
 		FluidRenderer fluidRenderer = new FluidRenderer(modelManager.getFluidStateModelSet());
 		BlockModelLighter.enableCaching();
 
-		var origin = poseStack.last()
-				.pose();
-		float originX = origin.m30();
-		float originY = origin.m31();
-		float originZ = origin.m32();
 
 		while (posIterator.hasNext()) {
 			BlockPos pos = posIterator.next();
@@ -99,7 +93,7 @@ final class BakedModelBufferer {
 
 				output.prepareForModelLayer(useAmbientOcclusion(level, pos, state));
 
-				blockRenderer.tesselateBlock(output, originX + pos.getX(), originY + pos.getY(), originZ + pos.getZ(), level, pos, state, model, state.getSeed(pos));
+				blockRenderer.tesselateBlock(output, pos.getX(), pos.getY(), pos.getZ(), level, pos, state, model, state.getSeed(pos));
 			}
 		}
 

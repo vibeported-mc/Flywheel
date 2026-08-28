@@ -4,7 +4,6 @@ import java.util.function.BiFunction;
 
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.UnknownNullability;
-import org.joml.Matrix4fc;
 
 import com.google.common.collect.ImmutableList;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -35,12 +34,12 @@ class MeshEmitterManager<T extends MeshEmitter> {
 		return emitterMap.get(renderType);
 	}
 
-	public void prepare(BlockMaterialFunction blockMaterialFunction, @Nullable Matrix4fc transform) {
+	public void prepare(BlockMaterialFunction blockMaterialFunction) {
 		this.blockMaterialFunction = blockMaterialFunction;
 		byteBufferBuilderStack.reset();
 
 		for (MeshEmitter emitter : emitterMap.values()) {
-			emitter.prepare(blockMaterialFunction, transform);
+			emitter.prepare(blockMaterialFunction);
 		}
 	}
 
