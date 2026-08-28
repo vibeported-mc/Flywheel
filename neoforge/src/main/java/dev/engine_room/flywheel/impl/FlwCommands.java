@@ -26,6 +26,23 @@ public final class FlwCommands {
 	private FlwCommands() {
 	}
 
+	/**
+	 * Rebuild everything a backend change invalidates.
+	 * <p>
+	 * In 26.2 rebuilding the chunk sections and reloading the level renderer are two different
+	 * calls: {@code allChanged} moved to the level extractor and no longer resets the renderer, so
+	 * on its own it never reaches {@code chooseBackend} and the backend would silently stay put -
+	 * leaving the command to report the one it just failed to switch away from as unavailable.
+	 */
+	private static void reloadRenderers() {
+		Minecraft minecraft = Minecraft.getInstance();
+		minecraft.levelExtractor.allChanged();
+
+		if (minecraft.level != null) {
+			FlwImplXplat.INSTANCE.dispatchReloadLevelRendererEvent(minecraft.level);
+		}
+	}
+
 	public static void registerClientCommands(RegisterClientCommandsEvent event) {
 		LiteralArgumentBuilder<CommandSourceStack> command = Commands.literal("flywheel");
 
@@ -43,7 +60,7 @@ public final class FlwCommands {
 						backendValue.set(FlwConfig.DEFAULT_BACKEND_STR);
 
 						// Reload renderers so we can report the actual backend.
-						Minecraft.getInstance().levelExtractor.allChanged();
+						reloadRenderers();
 
 						Backend actualBackend = BackendManager.currentBackend();
 						String actualIdStr = Backend.REGISTRY.getIdOrThrow(actualBackend)
@@ -59,7 +76,7 @@ public final class FlwCommands {
 						backendValue.set(requestedIdStr);
 
 						// Reload renderers so we can report the actual backend.
-						Minecraft.getInstance().levelExtractor.allChanged();
+						reloadRenderers();
 
 						Backend actualBackend = BackendManager.currentBackend();
 						if (actualBackend != requestedBackend) {
@@ -86,14 +103,14 @@ public final class FlwCommands {
 						.executes(context -> {
 							limitUpdatesValue.set(true);
 							sendMessage(context.getSource(), Component.translatable("command.flywheel.limit_updates.set.on"));
-							Minecraft.getInstance().levelExtractor.allChanged();
+							reloadRenderers();
 							return Command.SINGLE_SUCCESS;
 						}))
 				.then(Commands.literal("off")
 						.executes(context -> {
 							limitUpdatesValue.set(false);
 							sendMessage(context.getSource(), Component.translatable("command.flywheel.limit_updates.set.off"));
-							Minecraft.getInstance().levelExtractor.allChanged();
+							reloadRenderers();
 							return Command.SINGLE_SUCCESS;
 						})));
 
