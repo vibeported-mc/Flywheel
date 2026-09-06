@@ -56,6 +56,9 @@ public class ParallelTaskExecutor implements TaskExecutorImpl {
 		for (int i = 0; i < threadCount; i++) {
 			WorkerThread thread = new WorkerThread(name + " Task Executor #" + i);
 			thread.setPriority(Mth.clamp(Thread.NORM_PRIORITY - 2, Thread.MIN_PRIORITY, Thread.MAX_PRIORITY));
+			// Nothing stops these workers at shutdown, and the client no longer forces an exit
+			// once the render thread is done, so leave the JVM free to die without us.
+			thread.setDaemon(true);
 			thread.start();
 
 			threads.add(thread);
