@@ -46,10 +46,6 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.client.renderer.state.level.BlockBreakingRenderState;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.client.multiplayer.ClientChunkCache;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.LightLayer;
@@ -91,56 +87,6 @@ public class VisualizationManagerImpl implements VisualizationManager {
 		if (level instanceof Level l) {
 			LevelExtension.getAllLoadedEntities(l)
 					.forEach(entities::queueAdd);
-			queueLoadedBlockEntities(l);
-		}
-	}
-
-	/**
-	 * Queue the block entities that are already loaded, as the loaded entities are queued above.
-	 *
-	 * <p>A manager built while the level already has content otherwise never learns about any of it:
-	 * block entities reach it only through {@code LevelChunk.setBlockEntity}, which has already
-	 * happened. Entities were repopulated here and block entities were not, so every reset in a
-	 * loaded world -- switching the backend, for one -- silently lost every block entity visual,
-	 * while anything placed afterwards was fine.
-	 */
-	private void queueLoadedBlockEntities(Level level) {
-		if (!(level instanceof ClientLevel clientLevel)) {
-			return;
-		}
-
-		ClientChunkCache chunkSource = clientLevel.getChunkSource();
-
-		// Nothing to pick up. This is the usual case: a manager is built when the level is set, before
-		// a single chunk has arrived, and walking the whole render distance to find nothing would be
-		// pure waste. The scan only earns its keep when a manager is replaced in a level that is
-		// already populated -- switching the backend, reloading resources.
-		if (chunkSource.getLoadedChunksCount() == 0) {
-			return;
-		}
-
-		Minecraft minecraft = Minecraft.getInstance();
-		Entity cameraEntity = minecraft.getCameraEntity();
-
-		if (cameraEntity == null) {
-			return;
-		}
-
-		int radius = minecraft.options.getEffectiveRenderDistance() + 1;
-		ChunkPos center = cameraEntity.chunkPosition();
-		int centerX = center.x();
-		int centerZ = center.z();
-
-		for (int x = centerX - radius; x <= centerX + radius; x++) {
-			for (int z = centerZ - radius; z <= centerZ + radius; z++) {
-				LevelChunk chunk = chunkSource.getChunk(x, z, false);
-
-				if (chunk != null) {
-					chunk.getBlockEntities()
-							.values()
-							.forEach(blockEntities::queueAdd);
-				}
-			}
 		}
 	}
 
