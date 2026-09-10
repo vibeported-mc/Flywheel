@@ -61,15 +61,4 @@ abstract class LevelRendererMixin {
 		RenderContextHolder.set(null);
 	}
 
-	/**
-	 * {@code allChanged} became {@code resetLevelRenderData} when chunk rebuilds moved to the level
-	 * extractor.
-	 */
-	@Inject(method = "resetLevelRenderData", at = @At("RETURN"))
-	private void flywheel$reload(CallbackInfo ci) {
-		ClientLevel level = Minecraft.getInstance().level;
-		if (level != null) {
-			FlwImplXplat.INSTANCE.dispatchReloadLevelRendererEvent(level);
-		}
-	}
 }
