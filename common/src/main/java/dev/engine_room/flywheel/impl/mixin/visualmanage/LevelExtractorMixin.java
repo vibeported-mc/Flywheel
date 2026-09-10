@@ -7,6 +7,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import net.minecraft.client.Minecraft;
+import dev.engine_room.flywheel.impl.FlwImplXplat;
 import dev.engine_room.flywheel.api.visualization.VisualizationManager;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.extract.LevelExtractor;
@@ -42,6 +44,26 @@ abstract class LevelExtractorMixin {
 		} else {
 			// I don't think this is possible to reach in vanilla
 			blockEntities.queueUpdate(blockEntity);
+		}
+	}
+
+	/**
+	 * The successor to 1.21.1's {@code LevelRenderer.allChanged}, which is the hook Flywheel reloads
+	 * on.
+	 *
+	 * <h2>26.2 note</h2>
+	 * <p>This sat on {@code LevelRenderer.resetLevelRenderData}, on the reasoning that
+	 * {@code allChanged} had moved there. It had not: {@code LevelExtractor.allChanged} is still the
+	 * method, and {@code resetLevelRenderData} is a different, deferred one that also runs for
+	 * {@code setLevel} -- {@code setLevel} only raises {@code shouldResetLevelRenderData} and the
+	 * reset happens in the next {@code extract}, a frame later, by which time chunks have loaded.
+	 */
+	@Inject(method = "allChanged()V", at = @At("RETURN"))
+	private void flywheel$reload(CallbackInfo ci) {
+		ClientLevel level = Minecraft.getInstance().level;
+
+		if (level != null) {
+			FlwImplXplat.INSTANCE.dispatchReloadLevelRendererEvent(level);
 		}
 	}
 }
