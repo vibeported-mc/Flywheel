@@ -3,6 +3,7 @@ package dev.engine_room.flywheel.backend.engine.blaze;
 import java.io.IOException;
 
 import dev.engine_room.flywheel.api.instance.InstanceType;
+import dev.engine_room.flywheel.api.material.CardinalLightingMode;
 import net.minecraft.resources.Identifier;
 
 /**
@@ -65,7 +66,6 @@ public final class BlazeShaders {
 			out vec4 v_color;
 			out vec2 v_texCoord;
 			out vec2 v_light;
-			out float v_shade;
 			// How far this vertex is from the camera, measured the two ways 26.2's two fogs measure
 			// it. Computed here rather than in the fragment shader because the position it is
 			// measured from is the one the projection was applied to, and recovering that from a
@@ -79,23 +79,28 @@ public final class BlazeShaders {
 			""";
 
 	/**
-	 * Vanilla's cardinal face shading: top full, bottom half, north/south 0.8, east/west 0.6.
+	 * Which of vanilla's three shading curves a material is drawn with, chosen at compile time.
 	 *
-	 * <p>The blocky form rather than a smooth dot product, because Create's models are blocky and
-	 * this is the shading their textures were drawn to sit under. A smooth one makes every cog look
-	 * subtly plastic.
+	 * <p>The curves themselves come from Flywheel's {@code internal/diffuse.glsl}, pasted in as
+	 * shipped. An earlier version of this backend had a hand-written one instead -- a step function
+	 * over the cardinal directions, on the reasoning that Create's models are blocky. That was wrong
+	 * twice over. Flywheel's chunk curve is a smooth quadratic, not a step; and a step function is
+	 * visibly broken on anything that turns, because a normal sweeping past forty-five degrees jumps
+	 * between bands from one frame to the next. Rotating shafts flickered.
+	 *
+	 * <p>{@code OFF} really is no shading at all, which is what fluids ask for -- shading them makes
+	 * the surface of a tank read as a solid lid.
 	 */
-	private static final String DIFFUSE = """
-			float flw_diffuse(vec3 normal) {
-				if (normal.y > 0.5) {
-					return 1.0;
-				}
-				if (normal.y < -0.5) {
-					return 0.5;
-				}
-				return abs(normal.z) > abs(normal.x) ? 0.8 : 0.6;
-			}
-			""";
+	private static String diffuseFactor(CardinalLightingMode mode) {
+		String body = switch (mode) {
+			case OFF -> "return 1.0;";
+			case CHUNK -> """
+					return flw_constantAmbientLight == 1u ? diffuseNether(normal) : diffuse(normal);""";
+			case ENTITY -> "return diffuseFromLightDirections(normal);";
+		};
+
+		return "float _flw_diffuseFactor(vec3 normal) {\n\t" + body + "\n}\n";
+	}
 
 	/**
 	 * The two functions {@code light_lut.glsl} declares and leaves to the backend.
@@ -192,12 +197,6 @@ public final class BlazeShaders {
 				v_pos = flw_vertexPos.xyz;
 				v_normal = flw_vertexNormal;
 
-				// Minecraft's per-face brightness, which is what stops a blocky model reading as a
-				// flat silhouette. Chunk geometry gets this baked into its vertex colour by the
-				// mesher; an instanced model is transformed after that happens, so its shading has
-				// to be computed here from the normal the mod's body left behind.
-				v_shade = flw_diffuse(normalize(flw_vertexNormal));
-
 				// Spherical for the environmental fog and cylindrical for the render distance one,
 				// which is what makes the far edge of the loaded world a flat wall rather than a
 				// dome -- the two are not interchangeable and vanilla uses both.
@@ -218,7 +217,6 @@ public final class BlazeShaders {
 			in vec4 v_color;
 			in vec2 v_texCoord;
 			in vec2 v_light;
-			in float v_shade;
 			in vec2 v_fogDistance;
 			in vec3 v_pos;
 			in vec3 v_normal;
@@ -310,8 +308,13 @@ public final class BlazeShaders {
 					discard;
 				}
 
-				color.rgb *= v_shade;
+				// Minecraft's per-face brightness, which is what stops a model reading as a flat
+				// silhouette. Per fragment rather than per vertex, as Flywheel's own does.
+				color.rgb *= _flw_diffuseFactor(normalize(flw_vertexNormal));
+
+			#if FLW_USE_LIGHT
 				color *= texture(Sampler2, clamp(flw_fragLight, 0.5 / 16.0, 15.5 / 16.0));
+			#endif
 
 				fragColor = flw_fogFilter(color);
 			}
@@ -330,7 +333,8 @@ public final class BlazeShaders {
 	public static Identifier generate(InstanceType<?> type, int stride, Identifier fog,
 			Identifier cutout) throws IOException {
 		return generate(type, stride, fog, cutout,
-				Identifier.fromNamespaceAndPath("flywheel", "light/smooth.glsl"), true, false, false);
+				Identifier.fromNamespaceAndPath("flywheel", "light/smooth.glsl"), true,
+				CardinalLightingMode.CHUNK, true, false, false);
 	}
 
 	/**
@@ -342,7 +346,8 @@ public final class BlazeShaders {
 	 *            and drops the lighting and fog that would make it read as a separate object
 	 */
 	public static Identifier generate(InstanceType<?> type, int stride, Identifier fog,
-			Identifier cutout, Identifier light, boolean ambientOcclusion, boolean embedded,
+			Identifier cutout, Identifier light, boolean ambientOcclusion,
+			CardinalLightingMode cardinalLighting, boolean useLight, boolean embedded,
 			boolean crumbling) throws IOException {
 		String body = ShaderIncludes.read(type.vertexShader());
 
@@ -364,7 +369,6 @@ public final class BlazeShaders {
 				// of how a light is found, and a second copy of that would drift from this one.
 				+ ShaderIncludes.read(Identifier.fromNamespaceAndPath("flywheel",
 						"internal/light_lut.glsl")) + "\n"
-				+ DIFFUSE + "\n"
 				+ VARYINGS + "\n"
 				+ body + "\n"
 				+ MAIN;
@@ -375,6 +379,7 @@ public final class BlazeShaders {
 				// instance type at worst: embedded is a property of the instancer, not the draw.
 				+ (embedded ? "#define FLW_EMBEDDED\n" : "")
 				+ "#define FLW_AMBIENT_OCCLUSION " + ambientOcclusion + "\n"
+				+ "#define FLW_USE_LIGHT " + (useLight ? 1 : 0) + "\n"
 				+ BlazeUniforms.GLSL + "\n"
 				+ FRAGMENT_PREAMBLE + "\n"
 				+ (crumbling ? CRUMBLING_FRAGMENT_PREAMBLE + "\n" : "")
@@ -384,6 +389,11 @@ public final class BlazeShaders {
 				+ ShaderIncludes.read(Identifier.fromNamespaceAndPath("flywheel",
 						"internal/light_lut.glsl")) + "\n"
 				+ ShaderIncludes.read(light) + "\n"
+				// The three shading curves, then the one-line choice between them. Pasted in as
+				// shipped, so the two backends cannot disagree about what a lit face looks like.
+				+ ShaderIncludes.read(Identifier.fromNamespaceAndPath("flywheel",
+						"internal/diffuse.glsl")) + "\n"
+				+ diffuseFactor(cardinalLighting) + "\n"
 				+ ShaderIncludes.read(cutout) + "\n"
 				+ ShaderIncludes.read(fog) + "\n"
 				+ (crumbling ? CRUMBLING_FRAGMENT_MAIN : FRAGMENT_MAIN);
@@ -395,6 +405,9 @@ public final class BlazeShaders {
 		// difference at all and in the nether is every machine standing out of a red wall.
 		String name = flatten(type.vertexShader()) + "__" + flatten(cutout) + "__" + flatten(fog)
 				+ "__" + flatten(light) + (ambientOcclusion ? "_ao" : "")
+				+ "__" + cardinalLighting.name()
+						.toLowerCase()
+				+ (useLight ? "_lit" : "")
 				+ (embedded ? "__embedded" : "") + (crumbling ? "__crumbling" : "");
 
 		return GeneratedShaders.pipeline(name, vertex, fragment);

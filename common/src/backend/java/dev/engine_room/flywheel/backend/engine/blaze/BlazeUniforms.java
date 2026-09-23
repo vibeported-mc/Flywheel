@@ -11,8 +11,10 @@ import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.systems.RenderSystem;
 
 import dev.engine_room.flywheel.api.backend.RenderContext;
+import dev.engine_room.flywheel.backend.engine.uniform.LevelUniforms;
 import net.minecraft.client.renderer.fog.FogData;
 import net.minecraft.core.Vec3i;
+import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -34,10 +36,10 @@ import net.minecraft.world.phys.Vec3;
  */
 public class BlazeUniforms implements AutoCloseable {
 	/**
-	 * mat4 viewProjection, vec4 cameraPos, two floats padded to 16, ivec4 renderOrigin, then the fog
-	 * colour and its two ranges.
+	 * mat4 viewProjection, vec4 cameraPos, two floats padded to 16, ivec4 renderOrigin, the fog
+	 * colour and its two ranges, then the two light directions and the ambient-light flag.
 	 */
-	public static final int SIZE = 64 + 16 + 16 + 16 + 16 + 16;
+	public static final int SIZE = 64 + 16 + 16 + 16 + 16 + 16 + 16 + 16 + 16;
 
 	public static final String BLOCK_NAME = "FlwFrame";
 
@@ -64,7 +66,17 @@ public class BlazeUniforms implements AutoCloseable {
 				ivec4 _flw_renderOrigin;
 				vec4 flw_fogColor;
 				vec4 _flw_fogRanges;
+				vec4 _flw_light0Direction;
+				vec4 _flw_light1Direction;
+				uvec4 _flw_ambient;
 			};
+
+			// The two directional lights vanilla shades entities by, and whether this dimension uses
+			// the flat cardinal table the nether has. All three are read by `diffuse.glsl`, which is
+			// pasted in as shipped, so these are the names it has to find.
+			#define flw_light0Direction (_flw_light0Direction.xyz)
+			#define flw_light1Direction (_flw_light1Direction.xyz)
+			#define flw_constantAmbientLight (_flw_ambient.x)
 
 			// 26.2 runs two independent linear fogs -- an environmental one measured spherically and
 			// a render distance one measured cylindrically -- and takes whichever is stronger. Packed
@@ -107,7 +119,14 @@ public class BlazeUniforms implements AutoCloseable {
 					.putIVec4(renderOrigin.getX(), renderOrigin.getY(), renderOrigin.getZ(), 0)
 					.putVec4(fog.color.x(), fog.color.y(), fog.color.z(), fog.color.w())
 					.putVec4(fog.environmentalStart, fog.environmentalEnd, fog.renderDistanceStart,
-							fog.renderDistanceEnd);
+							fog.renderDistanceEnd)
+					// Filled by LightingMixin from vanilla's own entity lighting, so an instanced part
+					// is shaded by the same two lights as the block entity renderer it replaced.
+					.putVec4(LevelUniforms.LIGHT0_DIRECTION.x(), LevelUniforms.LIGHT0_DIRECTION.y(),
+							LevelUniforms.LIGHT0_DIRECTION.z(), 0.0f)
+					.putVec4(LevelUniforms.LIGHT1_DIRECTION.x(), LevelUniforms.LIGHT1_DIRECTION.y(),
+							LevelUniforms.LIGHT1_DIRECTION.z(), 0.0f)
+					.putIVec4(constantAmbientLight(context), 0, 0, 0);
 
 		BlazeStats.fogEnvironmentalStart = fog.environmentalStart;
 		BlazeStats.fogEnvironmentalEnd = fog.environmentalEnd;
@@ -135,6 +154,18 @@ public class BlazeUniforms implements AutoCloseable {
 			buffer.close();
 			buffer = null;
 		}
+	}
+
+	/**
+	 * Whether this dimension shades by the flat table rather than the sky-lit one.
+	 *
+	 * <p>What used to be {@code DimensionSpecialEffects#constantAmbientLight} is now the dimension's
+	 * cardinal light type, and the nether-style flat table is every type that is not the default.
+	 */
+	private static int constantAmbientLight(RenderContext context) {
+		return context.level()
+				.dimensionType()
+				.cardinalLightType() != CardinalLighting.Type.DEFAULT ? 1 : 0;
 	}
 
 	private static float renderSeconds(RenderContext context) {

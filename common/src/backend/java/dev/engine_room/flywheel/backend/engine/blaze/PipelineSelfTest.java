@@ -130,7 +130,8 @@ public final class PipelineSelfTest {
 				dev.engine_room.flywheel.api.material.DepthTest.LEQUAL,
 				dev.engine_room.flywheel.api.material.WriteMask.COLOR_DEPTH, true, false,
 				FogShaders.LINEAR.source(), CutoutShaders.ONE_TENTH.source(),
-				LightShaders.SMOOTH.source(), true));
+				LightShaders.SMOOTH.source(), true,
+				dev.engine_room.flywheel.api.material.CardinalLightingMode.CHUNK, true));
 	}
 
 	/** The same pipeline, with a material's fixed-function state baked into it. */

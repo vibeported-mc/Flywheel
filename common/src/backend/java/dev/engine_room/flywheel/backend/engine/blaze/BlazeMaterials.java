@@ -7,6 +7,7 @@ import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.platform.CompareOp;
 
+import dev.engine_room.flywheel.api.material.CardinalLightingMode;
 import dev.engine_room.flywheel.api.material.DepthTest;
 import dev.engine_room.flywheel.api.material.Material;
 import dev.engine_room.flywheel.api.material.Transparency;
@@ -43,7 +44,8 @@ public final class BlazeMaterials {
 	 */
 	public record Key(Transparency transparency, DepthTest depthTest, WriteMask writeMask,
 			boolean backfaceCulling, boolean polygonOffset, Identifier fog, Identifier cutout,
-			Identifier light, boolean ambientOcclusion) {
+			Identifier light, boolean ambientOcclusion, CardinalLightingMode cardinalLighting,
+			boolean useLight) {
 
 		public static Key of(Material material) {
 			return new Key(material.transparency(), material.depthTest(), material.writeMask(),
@@ -53,7 +55,8 @@ public final class BlazeMaterials {
 							.source(),
 					material.light()
 							.source(),
-					material.ambientOcclusion());
+					material.ambientOcclusion(), material.cardinalLightingMode(),
+					material.useLight());
 		}
 
 		/** A short, stable name, so a generated shader can be keyed by it without collisions. */

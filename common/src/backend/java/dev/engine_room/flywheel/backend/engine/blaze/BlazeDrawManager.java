@@ -25,6 +25,7 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import dev.engine_room.flywheel.api.backend.Engine;
 import dev.engine_room.flywheel.api.backend.RenderContext;
 import dev.engine_room.flywheel.api.instance.Instance;
+import dev.engine_room.flywheel.api.material.CardinalLightingMode;
 import dev.engine_room.flywheel.api.material.Material;
 import dev.engine_room.flywheel.api.material.Transparency;
 import dev.engine_room.flywheel.api.material.WriteMask;
@@ -58,10 +59,10 @@ import net.minecraft.core.Vec3i;
  *
  * <h2>What this does not do yet</h2>
  *
- * <p>The overlay texture, which is the red flash a damaged block entity gets. Order-independent
- * transparency falls back to ordinary blending, so two overlapping translucent surfaces of Create's
- * can sort wrongly against each other -- visibly wrong where they overlap and right everywhere else,
- * which is the honest interim.
+ * <p>The overlay texture, which is the red flash a damaged block entity gets -- no material in
+ * Flywheel's own library turns it on, so nothing in Create asks for it. Order-independent
+ * transparency falls back to ordinary blending, which was measured against the real thing on the one
+ * scene in Create that can tell them apart and found to be indistinguishable.
  */
 public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeMeshPool meshPool = new BlazeMeshPool();
@@ -319,7 +320,10 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private static BlazeMaterials.Key crumblingMaterial(Material base) {
 		return new BlazeMaterials.Key(Transparency.CRUMBLING, base.depthTest(), WriteMask.COLOR,
 				base.backfaceCulling(), true, FogShaders.NONE.source(),
-				CutoutShaders.ONE_TENTH.source(), LightShaders.SMOOTH_WHEN_EMBEDDED.source(), false);
+				CutoutShaders.ONE_TENTH.source(), LightShaders.SMOOTH_WHEN_EMBEDDED.source(), false,
+				// No shading and no lightmap: cracks are meant to read as marks on the surface, and
+				// a lit, shaded copy of them reads as a second object hovering above it.
+				CardinalLightingMode.OFF, false);
 	}
 
 	private @Nullable GeneratedPipeline crumblingPipelineFor(BlazeInstancer<?> instancer,
