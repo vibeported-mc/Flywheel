@@ -56,6 +56,55 @@ public final class Blaze3dx {
 	}
 
 	/**
+	 * Limit which mip levels of a texture may be sampled, on OpenGL only.
+	 *
+	 * <p>For a pass that draws into one level of a texture while sampling another. Vulkan describes
+	 * each level with its own image view and the two never meet, so this is a no-op there. OpenGL
+	 * binds the whole texture object to a sampler, so the level being drawn into is also, as far as
+	 * the driver can tell, readable -- which is a feedback loop, and the result of the whole read is
+	 * undefined.
+	 *
+	 * <p>Undefined in practice means zero, everywhere, with no GL error raised: a depth pyramid whose
+	 * first level is correct and whose every later level is empty. Restricting the range to exactly
+	 * the source level makes the two disjoint and the read well defined again.
+	 *
+	 * <p>Callers must put the range back with {@link #releaseMipRange} once the pass is done, or the
+	 * next thing to sample that texture sees only the sliver left behind.
+	 */
+	public static void restrictMipRange(com.mojang.blaze3d.textures.GpuTexture texture, int base,
+			int max) {
+		if (glDevice() == null
+				|| !(texture instanceof com.mojang.blaze3d.opengl.GlTexture gl)) {
+			return;
+		}
+
+		if (org.lwjgl.opengl.GL.getCapabilities().GL_ARB_direct_state_access) {
+			org.lwjgl.opengl.ARBDirectStateAccess.glTextureParameteri(gl.glId(),
+					org.lwjgl.opengl.GL33C.GL_TEXTURE_BASE_LEVEL, base);
+			org.lwjgl.opengl.ARBDirectStateAccess.glTextureParameteri(gl.glId(),
+					org.lwjgl.opengl.GL33C.GL_TEXTURE_MAX_LEVEL, max);
+			return;
+		}
+
+		// Without direct state access the texture has to be bound to be touched. Unit 11 is the last
+		// one GlStateManager keeps a shadow of, so it is the least likely to be carrying anything a
+		// draw is about to want, and it is put back empty afterwards.
+		com.mojang.blaze3d.opengl.GlStateManager._activeTexture(org.lwjgl.opengl.GL33C.GL_TEXTURE0 + 11);
+		com.mojang.blaze3d.opengl.GlStateManager._bindTexture(gl.glId());
+		org.lwjgl.opengl.GL33C.glTexParameteri(org.lwjgl.opengl.GL33C.GL_TEXTURE_2D,
+				org.lwjgl.opengl.GL33C.GL_TEXTURE_BASE_LEVEL, base);
+		org.lwjgl.opengl.GL33C.glTexParameteri(org.lwjgl.opengl.GL33C.GL_TEXTURE_2D,
+				org.lwjgl.opengl.GL33C.GL_TEXTURE_MAX_LEVEL, max);
+		com.mojang.blaze3d.opengl.GlStateManager._bindTexture(0);
+		com.mojang.blaze3d.opengl.GlStateManager._activeTexture(org.lwjgl.opengl.GL33C.GL_TEXTURE0);
+	}
+
+	/** Undoes {@link #restrictMipRange}, opening the whole chain back up. */
+	public static void releaseMipRange(com.mojang.blaze3d.textures.GpuTexture texture, int levels) {
+		restrictMipRange(texture, 0, Math.max(0, levels - 1));
+	}
+
+	/**
 	 * Forget which program and pipeline Blaze3D believes are bound.
 	 *
 	 * <p>{@code GlCommandEncoder} only calls {@code glUseProgram} when the program differs from the

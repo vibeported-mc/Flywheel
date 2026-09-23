@@ -187,10 +187,6 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		try {
 			depthPyramid.build(depth, depthView);
 			BlazeStats.depthPyramidLevels = depthPyramid.levels();
-
-			// Fine enough that solid ground reads as ground rather than as the sky behind it, which
-			// is what anything checking the pyramid needs to see.
-			depthPyramid.sampleLevel(Math.min(2, depthPyramid.levels() - 1));
 		} catch (Exception e) {
 			// One bad frame should not take the renderer down with it, and a pyramid is an
 			// optimisation: without it the cull pass simply tests fewer things.

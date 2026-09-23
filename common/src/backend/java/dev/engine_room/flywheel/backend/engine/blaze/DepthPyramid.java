@@ -9,7 +9,6 @@ import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
-import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
@@ -17,6 +16,8 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
+
+import dev.engine_room.flywheel.backend.compute.Blaze3dx;
 
 import net.minecraft.resources.Identifier;
 
@@ -144,23 +145,6 @@ public class DepthPyramid implements AutoCloseable {
 	/** Whether the reduction pipeline compiled, for anything asking why the chain is empty. */
 	private boolean valid;
 
-	/**
-	 * One level, copied out every frame so anything outside the frame can look at it.
-	 *
-	 * <p>Copied rather than read on demand because {@code copyTextureToBuffer} is asynchronous and
-	 * says so only through a callback: a copy started and read in the same breath returns whatever
-	 * was in that memory, which came back as NaN. Started inside the frame and read later, the copy
-	 * has long since landed.
-	 */
-	private @Nullable GpuBuffer sample;
-
-	private int sampleLevel;
-	private int sampleTexels;
-
-	private @Nullable GpuBuffer storage;
-	private int storageLevel;
-	private int storageTexels;
-
 	public DepthPyramid() {
 		levelViews = new GpuTextureView[32];
 	}
@@ -229,6 +213,13 @@ public class DepthPyramid implements AutoCloseable {
 		for (int level = 0; level < levels; level++) {
 			GpuTextureView source = level == 0 ? depthView : levelViews[level - 1];
 
+			// OpenGL samples the whole texture object, so without this the level being drawn into
+			// is also readable and the read is a feedback loop -- which yields zeroes, silently,
+			// for every level after the first. A no-op on Vulkan, where the views keep them apart.
+			if (level > 0) {
+				Blaze3dx.restrictMipRange(texture, level - 1, level - 1);
+			}
+
 			try (RenderPass pass = encoder.createRenderPass(() -> "flywheel depth pyramid",
 					levelViews[level], Optional.empty(), null, OptionalDouble.empty())) {
 
@@ -240,92 +231,15 @@ public class DepthPyramid implements AutoCloseable {
 				// asks for zero vertices and three instances starting at instance one. It draws
 				// nothing, reports nothing wrong, and leaves a pyramid of zeroes behind.
 				pass.draw(3, 1, 0, 0);
+
 			}
 		}
+
+		// Opened back up, or the next thing to sample the chain -- the cull pass, which picks its
+		// own level -- sees only the sliver the last reduction left behind.
+		Blaze3dx.releaseMipRange(texture, levels);
 	}
 
-	/**
-	 * Starts the copy of one level into the buffer {@link #sample()} returns.
-	 *
-	 * <p>Call from inside the frame, right after building. Nothing waits on it.
-	 */
-	public void sampleLevel(int level) {
-		if (texture == null || level >= levels) {
-			return;
-		}
-
-		int texels = texture.getWidth(level) * texture.getHeight(level);
-
-		if (sample == null || sampleLevel != level || sampleTexels != texels) {
-			if (sample != null) {
-				sample.close();
-			}
-			sample = RenderSystem.getDevice()
-					.createBuffer(() -> "flywheel depth pyramid sample",
-							GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST,
-							(long) texels * Float.BYTES);
-			sampleLevel = level;
-			sampleTexels = texels;
-		}
-
-		RenderSystem.getDevice()
-				.createCommandEncoder()
-				.copyTextureToBuffer(texture, sample, 0, () -> {
-				}, level);
-	}
-
-	/**
-	 * Copies one level into a buffer a compute shader can read.
-	 *
-	 * <p>Separate from {@link #sampleLevel} because the destination is a storage buffer rather than a
-	 * mappable one: this is the copy the cull pass needs, not the one a test reads. Both go through
-	 * {@code copyTextureToBuffer}, which is the call whose completion callback never fires here --
-	 * so whether this arrives at all is the question the self-test answers by scanning the result on
-	 * the GPU rather than on the CPU.
-	 */
-	public @Nullable GpuBuffer storageOf(int level) {
-		if (texture == null || level >= levels) {
-			return null;
-		}
-
-		int texels = texture.getWidth(level) * texture.getHeight(level);
-
-		if (storage == null || storageLevel != level || storageTexels != texels) {
-			if (storage != null) {
-				storage.close();
-			}
-			storage = RenderSystem.getDevice()
-					.createBuffer(() -> "flywheel depth pyramid storage",
-							dev.engine_room.flywheel.backend.compute.FlwBufferUsage.STORAGE
-									| GpuBuffer.USAGE_COPY_DST,
-							(long) texels * Float.BYTES);
-			storageLevel = level;
-			storageTexels = texels;
-		}
-
-		RenderSystem.getDevice()
-				.createCommandEncoder()
-				.copyTextureToBuffer(texture, storage, 0, () -> {
-				}, level);
-
-		return storage;
-	}
-
-	public int storageTexels() {
-		return storageTexels;
-	}
-
-	public @Nullable GpuBuffer sample() {
-		return sample;
-	}
-
-	public int sampleTexels() {
-		return sampleTexels;
-	}
-
-	public int sampledLevel() {
-		return sampleLevel;
-	}
 
 	@Override
 	public void close() {
@@ -346,17 +260,7 @@ public class DepthPyramid implements AutoCloseable {
 			texture = null;
 		}
 
-		if (sample != null) {
-			sample.close();
-			sample = null;
-			sampleTexels = 0;
-		}
 
-		if (storage != null) {
-			storage.close();
-			storage = null;
-			storageTexels = 0;
-		}
 
 		levels = 0;
 		width = 0;
@@ -441,11 +345,28 @@ public class DepthPyramid implements AutoCloseable {
 		return built;
 	}
 
+	/**
+	 * How many levels the chain can have before a dimension runs out.
+	 *
+	 * <p>Stops when the <em>smaller</em> side reaches one, rather than carrying on to a 1x1 top the
+	 * way a full mip chain does. The difference is one level on a 16:9 screen and it is not
+	 * cosmetic: Blaze3D sizes a level by shifting, without clamping the result to one, so a 640x360
+	 * pyramid asked for ten levels reports its last as 640x360 shifted nine places -- which is 1x0.
+	 *
+	 * <p>Vulkan tolerates that. OpenGL never allocates the level, so attaching it gives
+	 * {@code GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT}, and from there the symptom is not an exception
+	 * but a quiet one: the reduction draws nothing anywhere, every texel of the chain stays zero,
+	 * the cull pass finds nothing farther than a sphere can be, and occlusion culling reports
+	 * exactly zero hidden instances while looking entirely healthy.
+	 *
+	 * <p>The lost level costs nothing. A pyramid top of 2x1 is already far coarser than any
+	 * bounding sphere's rectangle asks for.
+	 */
 	private static int mipLevelsFor(int w, int h) {
 		int levels = 1;
-		while (w > 1 || h > 1) {
-			w = Math.max(1, w / 2);
-			h = Math.max(1, h / 2);
+		while (w / 2 >= 1 && h / 2 >= 1) {
+			w /= 2;
+			h /= 2;
 			levels++;
 		}
 		return levels;

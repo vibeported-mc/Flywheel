@@ -72,7 +72,7 @@ public class BlazeCull implements AutoCloseable {
 	 * <p>Those five are not decoration. A cull pass that removes nothing and a cull pass that is
 	 * never reached both leave every instance drawn, and no frame rate tells them apart.
 	 */
-	static final int COUNTS_SLOTS = 6;
+	static final int COUNTS_SLOTS = 8;
 
 	static final int COUNTS_BYTES = COUNTS_SLOTS * Integer.BYTES;
 

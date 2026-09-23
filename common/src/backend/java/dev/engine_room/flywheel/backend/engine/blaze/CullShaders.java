@@ -44,6 +44,12 @@ public final class CullShaders {
 				uint _flw_tooClose;
 				uint _flw_offScreen;
 				uint _flw_occludedCount;
+
+				// Diagnostic: the largest value each side of the occlusion comparison ever took,
+				// scaled by a million because atomicMax wants an integer. Reads of zero for the
+				// first mean the pyramid is not reaching the shader at all.
+				uint _flw_maxFurthest;
+				uint _flw_maxHiZ;
 			};
 
 			layout(std430, FLW_SET(0) binding = 2) writeonly buffer Visible {
@@ -176,7 +182,10 @@ public final class CullShaders {
 				// and 0.03 -- which reads as "small numbers, therefore near is zero" and is exactly
 				// backwards. The tell is the sky: it comes back as precisely 0.0, and the sky is the
 				// far plane.
-				return hi.z < furthestDrawn;
+				atomicMax(_flw_maxFurthest, uint(max(furthestDrawn, 0.0) * 1000000.0));
+					atomicMax(_flw_maxHiZ, uint(max(hi.z, 0.0) * 1000000.0));
+
+					return hi.z < furthestDrawn;
 			}
 
 			void main() {

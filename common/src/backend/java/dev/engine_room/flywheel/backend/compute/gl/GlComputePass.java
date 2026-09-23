@@ -21,12 +21,15 @@ import dev.engine_room.flywheel.backend.compute.ComputePipeline;
 
 public final class GlComputePass implements ComputePass {
 	/**
-	 * The highest texture unit, where this backend's own samplers go.
+	 * How many texture units {@code GlStateManager} keeps a shadow of.
 	 *
-	 * <p>Blaze3D assigns units from zero upwards, so anything bound low is liable to be trampled by
-	 * the next draw or to trample it.
+	 * <p>It holds the bound texture per unit in an array of exactly this many and indexes it with
+	 * whatever {@code _activeTexture} was last given. The driver has far more units, and binding to
+	 * unit 15 is perfectly legal OpenGL -- it is Minecraft's bookkeeping that has no slot for it,
+	 * and the result is an {@code ArrayIndexOutOfBoundsException} out of the middle of a frame
+	 * rather than a GL error.
 	 */
-	private static final int LAST_TEXTURE_UNIT = 15;
+	private static final int SHADOWED_TEXTURE_UNITS = 12;
 
 	private final String label;
 	private final List<Integer> boundBindings = new ArrayList<>(4);
@@ -59,12 +62,22 @@ public final class GlComputePass implements ComputePass {
 	}
 
 	/**
-	 * Binds a texture for the shader to sample, on a unit chosen not to collide with Blaze3D's.
+	 * Binds a texture for the shader to sample, on the unit the shader itself names.
 	 *
-	 * <p>{@code GlProgram.setupBindGroupLayouts} hands out sampler units from zero upwards, so the
-	 * low ones belong to whatever draw comes next. These go at the top of the range and
-	 * {@link #close()} puts the active unit back, which is the same reason the whole pass is an
-	 * object rather than a few static calls.
+	 * <p>The unit is the binding, and that is not a choice. {@code FLW_SET(n)} expands to nothing on
+	 * this backend, so a declaration written for Vulkan as
+	 * {@code layout(FLW_SET(0) binding = 6) uniform sampler2D} reaches the GLSL compiler as
+	 * {@code layout(binding = 6)} -- and on a sampler that <em>is</em> the texture unit, fixed at
+	 * compile time with no uniform to assign afterwards.
+	 *
+	 * <p>An earlier version bound high instead, on the reasoning that Blaze3D hands sampler units out
+	 * from zero upwards and the low ones belong to the next draw. Which is true, and beside the
+	 * point: the shader was still reading unit 6 and found whatever happened to be there. Every
+	 * texel came back zero, nothing was ever occluded, and no error said so.
+	 *
+	 * <p>Trampling is handled by {@link #close()} instead -- it unbinds each unit it touched, puts
+	 * the active unit back to zero and drops the program cache, so the next draw re-establishes its
+	 * own samplers. Which is the reason the whole pass is an object rather than a few static calls.
 	 */
 	@Override
 	public void bindTexture(int binding, GpuTextureView view, GpuSampler sampler) {
@@ -73,12 +86,16 @@ public final class GlComputePass implements ComputePass {
 			throw new IllegalArgumentException("binding " + binding + " is not an image binding; "
 					+ "images live from " + ComputePipeline.FIRST_IMAGE_BINDING + " upwards");
 		}
+		if (binding >= SHADOWED_TEXTURE_UNITS) {
+			throw new IllegalArgumentException("binding " + binding + " is beyond the "
+					+ SHADOWED_TEXTURE_UNITS + " texture units GlStateManager tracks; binding it "
+					+ "would throw out of the middle of a frame");
+		}
 		if (!(view instanceof GlTextureView glView)) {
 			throw new IllegalArgumentException("texture view was not created by the OpenGL backend");
 		}
 
-		// Counted down from the top so the first image binding lands on the highest unit.
-		int unit = LAST_TEXTURE_UNIT - (binding - ComputePipeline.FIRST_IMAGE_BINDING);
+		int unit = binding;
 
 		GlStateManager._activeTexture(GL30C.GL_TEXTURE0 + unit);
 		GlStateManager._bindTexture(glView.texture()
@@ -86,7 +103,15 @@ public final class GlComputePass implements ComputePass {
 
 		// Sampler state comes from the texture object on this path rather than from a sampler
 		// object, which is enough for the nearest-neighbour reads a depth pyramid does.
-		GL30C.glTexParameteri(GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_MIN_FILTER, GL30C.GL_NEAREST);
+		//
+		// NEAREST_MIPMAP_NEAREST rather than plain NEAREST, although nothing here filters between
+		// levels and texelFetch ignores the filter entirely. What it does not ignore is
+		// completeness, and completeness is judged against the filter: with a non-mipmap minifier
+		// OpenGL considers only the base level, and a texelFetch naming any other lod is undefined.
+		// In practice it returns zero -- so a shader picking its level by how big something looks on
+		// screen reads a pyramid of zeroes for everything but the closest, with no error anywhere.
+		GL30C.glTexParameteri(GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_MIN_FILTER,
+				GL30C.GL_NEAREST_MIPMAP_NEAREST);
 		GL30C.glTexParameteri(GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_MAG_FILTER, GL30C.GL_NEAREST);
 
 		boundTextureUnits.add(unit);
