@@ -101,9 +101,17 @@ public final class PipelineSelfTest {
 	}
 
 	public static RenderPipeline pipelineFor(Identifier shaders) {
+		return pipelineFor(shaders, new BlazeMaterials.Key(
+				dev.engine_room.flywheel.api.material.Transparency.OPAQUE,
+				dev.engine_room.flywheel.api.material.DepthTest.LEQUAL,
+				dev.engine_room.flywheel.api.material.WriteMask.COLOR_DEPTH, true, false));
+	}
+
+	/** The same pipeline, with a material's fixed-function state baked into it. */
+	public static RenderPipeline pipelineFor(Identifier shaders, BlazeMaterials.Key material) {
 		return RenderPipeline.builder()
 				.withLocation(Identifier.fromNamespaceAndPath("flywheel",
-						"pipeline/" + shaders.getPath()))
+						"pipeline/" + shaders.getPath() + "/" + material.describe()))
 				.withVertexShader(shaders)
 				.withFragmentShader(shaders)
 				.withVertexBinding(0, BlazeVertex.FORMAT)
@@ -112,8 +120,9 @@ public final class PipelineSelfTest {
 				// DEFAULT is GREATER_THAN_OR_EQUAL, which is right rather than backwards: 26.2's
 				// depth buffer is reversed, near at 1 and far at 0. A pipeline naming no depth state
 				// gets no depth attachment at all and draws over everything.
-				.withDepthStencilState(DepthStencilState.DEFAULT)
-				.withCull(true)
+				.withDepthStencilState(BlazeMaterials.depthStencil(material))
+				.withColorTargetState(BlazeMaterials.colorTarget(material))
+				.withCull(material.backfaceCulling())
 				.build();
 	}
 }

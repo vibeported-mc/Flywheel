@@ -58,7 +58,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeEnvironments environments = new BlazeEnvironments();
 
 	/** One pipeline per instance type, since the shader is generated from its layout. */
-	private final Map<Object, @Nullable GeneratedPipeline> pipelines = new HashMap<>();
+	private final Map<PipelineKey, @Nullable GeneratedPipeline> pipelines = new HashMap<>();
 
 	private @Nullable RenderContext context;
 	private Vec3i renderOrigin = Vec3i.ZERO;
@@ -194,21 +194,10 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	}
 
 	private void draw(RenderPass pass, BlazeInstancer<?> instancer) {
-		// computeIfAbsent will not store a null, so a type whose shader did not compile would be
-		// retried -- and re-logged -- every frame. Remembered as an explicit absence instead.
-		if (!pipelines.containsKey(instancer.type)) {
-			pipelines.put(instancer.type, GeneratedPipeline.of(instancer));
-		}
-
-		GeneratedPipeline pipeline = pipelines.get(instancer.type);
-		if (pipeline == null) {
-			return;
-		}
-
-		// Every declared binding must be supplied, and these are never absent: an empty volume is
-		// a buffer of zeros rather than nothing. Skipping the draw when there was no light yet is
-		// what made every machine in the world vanish -- a world with no light-using visual in it
-		// still has machines to draw.
+		// Every declared binding must be supplied, and these are never absent: an empty volume is a
+		// buffer of zeros rather than nothing. Skipping the draw when there was no light yet is what
+		// made every machine in the world vanish -- a world with no light-using visual in it still
+		// has machines to draw.
 		var lightSections = light.sections();
 		var lightLut = light.lut();
 
@@ -217,37 +206,71 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			return;
 		}
 
-		pass.setPipeline(pipeline.pipeline());
-		pass.setUniform(BlazeUniforms.BLOCK_NAME, uniforms.slice());
-		pass.setUniform(BlazeEnvironments.BLOCK_NAME,
-				environments.slice(environmentStorage, instancer.environment.matrixIndex()));
-		pass.setUniform("_flw_instances", instanceSlice);
-		pass.setUniform("_flw_lightSections", lightSections);
-		pass.setUniform("_flw_lightLut", lightLut);
-
 		var samplers = RenderSystem.getSamplerCache();
 		GpuTextureView lightmap = Minecraft.getInstance().gameRenderer.lightmap();
+		var environment = environments.slice(environmentStorage, instancer.environment.matrixIndex());
 
 		for (BlazeDraw draw : instancer.draws()) {
 			if (draw.isEmpty()) {
 				continue;
 			}
 
-			GpuTextureView diffuse = textureOf(draw.material().texture());
+			GpuTextureView diffuse = textureOf(draw.material()
+					.texture());
 			if (diffuse == null) {
 				continue;
 			}
 
+			// One pipeline per instance type and material state together: the type decides the
+			// shader, the material decides the blending, the depth test and the write mask. On 26.2
+			// all of that is baked into the pipeline rather than set before the draw, so two draws
+			// that differ in any of it cannot share one.
+			var material = BlazeMaterials.Key.of(draw.material());
+			GeneratedPipeline pipeline = pipelineFor(instancer, material);
+
+			if (pipeline == null) {
+				continue;
+			}
+
+			pass.setPipeline(pipeline.pipeline());
+			pass.setUniform(BlazeUniforms.BLOCK_NAME, uniforms.slice());
+			pass.setUniform(BlazeEnvironments.BLOCK_NAME, environment);
+			pass.setUniform("_flw_instances", instanceSlice);
+			pass.setUniform("_flw_lightSections", lightSections);
+			pass.setUniform("_flw_lightLut", lightLut);
+
 			// Nearest for the atlas, because a block texture filtered linearly bleeds between
 			// neighbouring sprites; linear for the lightmap, which is a gradient and wants it.
-			pass.bindTexture("Sampler0", diffuse,
-					samplers.getClampToEdge(draw.material().blur() ? FilterMode.LINEAR : FilterMode.NEAREST));
+			pass.bindTexture("Sampler0", diffuse, samplers.getClampToEdge(
+					draw.material()
+							.blur() ? FilterMode.LINEAR : FilterMode.NEAREST));
 			pass.bindTexture("Sampler2", lightmap, samplers.getClampToEdge(FilterMode.LINEAR));
 
 			var mesh = draw.mesh();
 			pass.drawIndexed(mesh.indexCount(), instancer.instanceCount(), mesh.firstIndex(),
 					mesh.baseVertex(), 0);
 		}
+	}
+
+	/**
+	 * The pipeline for one type drawn with one material's state, built once.
+	 *
+	 * <p>{@code containsKey} rather than {@code computeIfAbsent}, which will not store a null: a
+	 * shader that did not compile would otherwise be rebuilt, and re-logged, every frame.
+	 */
+	private @Nullable GeneratedPipeline pipelineFor(BlazeInstancer<?> instancer,
+			BlazeMaterials.Key material) {
+		var key = new PipelineKey(instancer.type, material);
+
+		if (!pipelines.containsKey(key)) {
+			pipelines.put(key, GeneratedPipeline.of(instancer, material));
+		}
+
+		return pipelines.get(key);
+	}
+
+	/** What a pipeline is cached by: the shader comes from the type, the state from the material. */
+	private record PipelineKey(Object type, BlazeMaterials.Key material) {
 	}
 
 	private static @Nullable GpuTextureView textureOf(net.minecraft.resources.Identifier location) {

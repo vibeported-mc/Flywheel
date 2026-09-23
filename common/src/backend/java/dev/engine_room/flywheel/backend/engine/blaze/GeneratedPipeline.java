@@ -31,7 +31,8 @@ public record GeneratedPipeline(RenderPipeline pipeline, Identifier shaders) {
 	 * generated source goes in the log next to the driver's complaint about it, which is the only
 	 * way to read an error reported as a line number in a file that exists nowhere.
 	 */
-	public static @Nullable GeneratedPipeline of(BlazeInstancer<?> instancer) {
+	public static @Nullable GeneratedPipeline of(BlazeInstancer<?> instancer,
+			BlazeMaterials.Key material) {
 		int stride = MoreMath.align16(instancer.type.layout()
 				.byteSize());
 
@@ -43,7 +44,7 @@ public record GeneratedPipeline(RenderPipeline pipeline, Identifier shaders) {
 			return null;
 		}
 
-		RenderPipeline pipeline = PipelineSelfTest.pipelineFor(shaders);
+		RenderPipeline pipeline = PipelineSelfTest.pipelineFor(shaders, material);
 
 		if (!RenderSystem.getDevice()
 				.precompilePipeline(pipeline)
