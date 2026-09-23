@@ -389,6 +389,11 @@ public class VisualizationManagerImpl implements VisualizationManager {
 		public void beforeCrumbling(RenderContext ctx, List<BlockBreakingRenderState> blockBreaking) {
 			renderCrumbling(ctx, blockBreaking);
 		}
+
+		@Override
+		public void afterLevelRender(RenderContext ctx) {
+			lateInit().engine.afterLevelRender(ctx);
+		}
 	}
 
 	private record CrumblingBlockImpl(BlockPos pos, int progress,

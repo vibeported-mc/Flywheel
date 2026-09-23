@@ -79,6 +79,18 @@ public interface Engine {
 	void renderCrumbling(RenderContext context, List<CrumblingBlock> crumblingBlocks);
 
 	/**
+	 * Called once the level render has finished, for work that cannot be done inside it.
+	 *
+	 * <p>Defaults to nothing, because only a backend that needs to read the frame's depth has any
+	 * use for it. That texture cannot be sampled during the level render at all -- it is the depth
+	 * attachment of the pass in progress, and sampling an attachment reads as zero.
+	 *
+	 * <p>This method is guaranteed to be called on the render thread.
+	 */
+	default void afterLevelRender(RenderContext context) {
+	}
+
+	/**
 	 * Free all resources associated with this engine.
 	 *
 	 * <p>This engine will not be used again after this method is called.

@@ -49,7 +49,23 @@ import net.minecraft.client.Minecraft;
  * and the reduction takes {@code min}. Getting that backwards does not fail; it builds a pyramid of
  * near depths, and occlusion culling against it hides everything the player can actually see.
  *
- * <h2>This currently fails, and the reason is structural</h2>
+ * <h2>This currently fails, and the reason is that nothing can read the pyramid</h2>
+ *
+ * <p>{@code copyTextureToBuffer} does not deliver. Three runs with three different shaders -- one of
+ * them writing a constant rather than a depth -- returned byte-identical results, and its completion
+ * callback never fires. The scan below does run and does see every texel; it is reading a buffer the
+ * copy never wrote. That holds for a mappable destination and for a storage one, with and without a
+ * barrier between the copy and the read.
+ *
+ * <p>Which blocks the feature rather than just the test. A compute shader can only read buffers, so
+ * occlusion culling needs the pyramid in a buffer, and that is the one call that puts it there.
+ *
+ * <p>The way out is to stop needing the copy: teach the compute layer to bind a sampled image, so
+ * the cull shader reads the pyramid texture directly. That is a change to this backend's own Vulkan
+ * and OpenGL compute plumbing -- a descriptor type and a texture binding -- rather than to anything
+ * of Blaze3D's, and it removes the dependency on a call that does not work.
+ *
+ * <h2>What else was ruled out on the way</h2>
  *
  * <p>The reduction runs and produces nothing but the far plane, and the cause is not the reduction.
  * The main depth texture is bound as the depth attachment of the surrounding level render at the
@@ -297,6 +313,12 @@ public final class DepthPyramidSelfTest {
 			Staging.upload(params.slice(), count);
 
 			try (ComputePass pass = gpu.beginPass("flywheel pyramid scan")) {
+				// Between the texture-to-buffer copy above and the reads below. Without it the
+				// dispatch may run before the copy lands, and it reads a buffer that has nothing in
+				// it -- which looks exactly like a copy that never happened, and had me concluding
+				// that copyTextureToBuffer does not work at all.
+				pass.barrier(BarrierScope.STORAGE | BarrierScope.BUFFER_UPDATE);
+
 				pass.setPipeline(pipeline);
 				pass.bindStorageBuffer(0, pyramidBuffer.slice());
 				pass.bindStorageBuffer(1, summary.slice());

@@ -66,6 +66,18 @@ public interface VisualizationManager {
 		void afterEntities(RenderContext ctx);
 
 		/**
+		 * Called once the level render has finished, while the frame's buffers are still current.
+		 *
+		 * <p>The only stage at which the level's depth texture can be <em>sampled</em>. During the
+		 * level render it is bound as the depth attachment of the pass in progress, and sampling a
+		 * texture that is currently an attachment is undefined -- it reads as zero rather than
+		 * failing. Anything that wants to read the depth of what was drawn has to wait until here.
+		 *
+		 * <p>Guaranteed to be called after {@link #afterEntities} and {@link #beforeCrumbling}.
+		 */
+		void afterLevelRender(RenderContext ctx);
+
+		/**
 		 * Render crumbling block entities.
 		 *
 		 * <p>Guaranteed to be called after {@link #onStartLevelRender} and {@link #afterEntities}

@@ -62,6 +62,29 @@ public class BlazeEngine extends EngineImpl {
 		}
 	}
 
+	/**
+	 * Reduces this frame's depth into the pyramid the next frame will cull against.
+	 *
+	 * <p>Here rather than in {@link #render}, and that is forced rather than chosen: during the level
+	 * render the depth texture is the attachment of the pass in progress, and sampling an attachment
+	 * reads as zero. Afterwards it is an ordinary texture again.
+	 *
+	 * <p>Which means the pyramid is always a frame behind, and that is how Hi-Z occlusion culling is
+	 * normally done anyway -- culling against the previous frame's depth costs a little accuracy when
+	 * the camera moves fast and nothing at all when it does not.
+	 */
+	@Override
+	public void afterLevelRender(RenderContext context) {
+		try {
+			if (drawManager() instanceof BlazeDrawManager blaze) {
+				blaze.buildDepthPyramid();
+			}
+		} catch (Exception e) {
+			// An optimisation failing should not take the renderer with it.
+			FlwBackend.LOGGER.error("Could not build the depth pyramid", e);
+		}
+	}
+
 	@Override
 	public void renderCrumbling(RenderContext context, List<CrumblingBlock> crumblingBlocks) {
 		try {

@@ -58,6 +58,18 @@ abstract class LevelRendererMixin {
 
 	@Inject(method = "render", at = @At("RETURN"))
 	private void flywheel$endRender(CallbackInfo ci) {
+		RenderContextImpl context = RenderContextHolder.get();
+
+		// Before the context is cleared, and after the level pass has finished, which is the only
+		// moment the frame's depth texture is readable as a texture rather than as an attachment.
+		if (context != null) {
+			VisualizationManager manager = VisualizationManager.get(context.level());
+			if (manager != null) {
+				manager.renderDispatcher()
+						.afterLevelRender(context);
+			}
+		}
+
 		RenderContextHolder.set(null);
 	}
 

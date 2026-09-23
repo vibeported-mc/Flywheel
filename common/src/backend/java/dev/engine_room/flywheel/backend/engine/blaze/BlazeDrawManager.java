@@ -159,25 +159,23 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			return;
 		}
 
-		// The depth of what has already been drawn this frame, reduced to a mip chain. Built here,
-		// inside the frame and after the terrain, because that is the only moment it holds anything:
-		// Minecraft clears the depth buffer every frame, so a pyramid built from outside the frame
-		// is a pyramid of the far plane, and occlusion culling against one of those hides the world.
-		buildDepthPyramid();
-
 		// Before the render pass, not inside it. A compute dispatch is illegal inside a render pass on
 		// Vulkan, and on OpenGL it would bind a program out from under the draws already recorded.
 		submit(drawable, cull.dispatch(drawable, context, renderOrigin));
 	}
 
 	/**
-	 * Reduces this frame's depth into the pyramid occlusion culling reads.
+	 * Reduces the frame's depth into the pyramid occlusion culling reads.
+	 *
+	 * <p>Called from {@link BlazeEngine#afterLevelRender} rather than from {@link #render}, because
+	 * the depth texture is the attachment of the pass in progress while the level is being drawn and
+	 * sampling an attachment reads as zero. The pyramid is therefore always one frame behind, which
+	 * is what Hi-Z occlusion culling does by convention anyway.
 	 *
 	 * <p>Kept alive between frames rather than rebuilt from scratch, so the texture holds the last
-	 * frame it was given even when nothing is looking -- which is what lets a test read it back at
-	 * an arbitrary moment and see a real scene rather than a cleared buffer.
+	 * frame it was given even when nothing is looking.
 	 */
-	private void buildDepthPyramid() {
+	void buildDepthPyramid() {
 		var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
 		var depth = target.getDepthTexture();
 		var depthView = target.getDepthTextureView();

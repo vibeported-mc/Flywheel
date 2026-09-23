@@ -69,6 +69,15 @@ public class DepthPyramid implements AutoCloseable {
 			}
 			""";
 
+	/**
+	 * Makes the reduction write a constant instead of a depth, for telling two failures apart.
+	 *
+	 * <p>If a readback shows the constant, the draw and the target are fine and the depth fetch is
+	 * not. If it shows the same thing either way -- which is what happened -- then nothing is reading
+	 * the pyramid at all and the fault is downstream of it.
+	 */
+	private static final boolean PROBE = Boolean.getBoolean("flywheel.pyramidProbe");
+
 	private static final String FRAGMENT = """
 			#version 460 core
 
@@ -93,6 +102,11 @@ public class DepthPyramid implements AutoCloseable {
 
 				// Farthest, and on a reversed depth buffer that is the smallest.
 				fragColor = min(min(a, b), min(c, d));
+			#ifdef FLW_PYRAMID_PROBE
+				// A constant, to tell "the pass never wrote" from "the sample returned zero". If the
+				// readback shows this, the draw and the target are fine and the depth fetch is not.
+				fragColor = 0.5;
+			#endif
 			}
 			""";
 
@@ -327,7 +341,11 @@ public class DepthPyramid implements AutoCloseable {
 
 	private RenderPipeline pipeline() {
 		if (pipeline == null) {
-			Identifier shaders = GeneratedShaders.pipeline("flywheel_depth_pyramid", VERTEX, FRAGMENT);
+			String fragment = PROBE
+					? FRAGMENT.replace("#version 460 core", "#version 460 core\n#define FLW_PYRAMID_PROBE")
+					: FRAGMENT;
+
+			Identifier shaders = GeneratedShaders.pipeline("flywheel_depth_pyramid", VERTEX, fragment);
 
 			pipeline = RenderPipeline.builder()
 					.withLocation(Identifier.fromNamespaceAndPath("flywheel", "pipeline/depth_pyramid"))
