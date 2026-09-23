@@ -1,6 +1,8 @@
 package dev.engine_room.flywheel.backend.compute;
 
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.textures.GpuSampler;
+import com.mojang.blaze3d.textures.GpuTextureView;
 
 /**
  * A scope in which compute work is recorded.
@@ -20,6 +22,20 @@ public interface ComputePass extends AutoCloseable {
 	 * buffer binding points Blaze3D hands out, so these indices cannot collide with vanilla's.
 	 */
 	void bindStorageBuffer(int binding, GpuBufferSlice slice);
+
+	/**
+	 * Binds a texture for the shader to sample.
+	 *
+	 * <p>The binding must be at least {@link ComputePipeline#FIRST_IMAGE_BINDING}: a descriptor set
+	 * has to say ahead of time which of its slots are buffers and which are images, so the two live
+	 * in fixed ranges rather than being mixed freely.
+	 *
+	 * <p>This exists because a compute shader cannot otherwise read a texture at all, and the one
+	 * thing that has to be read that way is the depth pyramid. Copying it into a buffer instead
+	 * would be the obvious alternative and does not work: {@code copyTextureToBuffer} never delivers
+	 * its data on 26.2.
+	 */
+	void bindTexture(int binding, GpuTextureView view, GpuSampler sampler);
 
 	/** Launch {@code x * y * z} workgroups. */
 	void dispatch(int x, int y, int z);

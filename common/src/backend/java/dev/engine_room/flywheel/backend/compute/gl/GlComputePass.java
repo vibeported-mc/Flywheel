@@ -8,6 +8,9 @@ import org.lwjgl.opengl.GL43C;
 import org.lwjgl.opengl.GL44C;
 
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.opengl.GlTextureView;
+import com.mojang.blaze3d.textures.GpuSampler;
+import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.opengl.GlBuffer;
 import com.mojang.blaze3d.opengl.GlStateManager;
 
@@ -17,8 +20,17 @@ import dev.engine_room.flywheel.backend.compute.ComputePass;
 import dev.engine_room.flywheel.backend.compute.ComputePipeline;
 
 public final class GlComputePass implements ComputePass {
+	/**
+	 * The highest texture unit, where this backend's own samplers go.
+	 *
+	 * <p>Blaze3D assigns units from zero upwards, so anything bound low is liable to be trampled by
+	 * the next draw or to trample it.
+	 */
+	private static final int LAST_TEXTURE_UNIT = 15;
+
 	private final String label;
 	private final List<Integer> boundBindings = new ArrayList<>(4);
+	private final List<Integer> boundTextureUnits = new ArrayList<>(2);
 	private boolean closed;
 
 	GlComputePass(String label) {
@@ -44,6 +56,40 @@ public final class GlComputePass implements ComputePass {
 		GL30C.glBindBufferRange(GL43C.GL_SHADER_STORAGE_BUFFER, binding, buffer.handle(),
 				slice.offset(), slice.length());
 		boundBindings.add(binding);
+	}
+
+	/**
+	 * Binds a texture for the shader to sample, on a unit chosen not to collide with Blaze3D's.
+	 *
+	 * <p>{@code GlProgram.setupBindGroupLayouts} hands out sampler units from zero upwards, so the
+	 * low ones belong to whatever draw comes next. These go at the top of the range and
+	 * {@link #close()} puts the active unit back, which is the same reason the whole pass is an
+	 * object rather than a few static calls.
+	 */
+	@Override
+	public void bindTexture(int binding, GpuTextureView view, GpuSampler sampler) {
+		checkOpen();
+		if (binding < ComputePipeline.FIRST_IMAGE_BINDING) {
+			throw new IllegalArgumentException("binding " + binding + " is not an image binding; "
+					+ "images live from " + ComputePipeline.FIRST_IMAGE_BINDING + " upwards");
+		}
+		if (!(view instanceof GlTextureView glView)) {
+			throw new IllegalArgumentException("texture view was not created by the OpenGL backend");
+		}
+
+		// Counted down from the top so the first image binding lands on the highest unit.
+		int unit = LAST_TEXTURE_UNIT - (binding - ComputePipeline.FIRST_IMAGE_BINDING);
+
+		GlStateManager._activeTexture(GL30C.GL_TEXTURE0 + unit);
+		GlStateManager._bindTexture(glView.texture()
+				.glId());
+
+		// Sampler state comes from the texture object on this path rather than from a sampler
+		// object, which is enough for the nearest-neighbour reads a depth pyramid does.
+		GL30C.glTexParameteri(GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_MIN_FILTER, GL30C.GL_NEAREST);
+		GL30C.glTexParameteri(GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_MAG_FILTER, GL30C.GL_NEAREST);
+
+		boundTextureUnits.add(unit);
 	}
 
 	@Override
@@ -83,6 +129,16 @@ public final class GlComputePass implements ComputePass {
 			GL30C.glBindBufferBase(GL43C.GL_SHADER_STORAGE_BUFFER, binding, 0);
 		}
 		boundBindings.clear();
+
+		// Sampler units are not ours either. Blaze3D hands them out from zero upwards and leaves the
+		// active unit wherever it was, so a pass that binds high and walks away leaves the next draw
+		// selecting a unit nobody set up.
+		for (int unit : boundTextureUnits) {
+			GlStateManager._activeTexture(GL30C.GL_TEXTURE0 + unit);
+			GlStateManager._bindTexture(0);
+		}
+		boundTextureUnits.clear();
+		GlStateManager._activeTexture(GL30C.GL_TEXTURE0);
 
 		GlStateManager._glUseProgram(0);
 		Blaze3dx.invalidateProgramCache();

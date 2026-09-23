@@ -33,7 +33,7 @@ import dev.engine_room.flywheel.backend.compute.ComputePipeline;
  */
 public final class VkComputePipeline implements ComputePipeline {
 	/** Every binding is a storage buffer; that is all a cull pass needs. */
-	static final int MAX_BINDINGS = 8;
+	static final int MAX_BINDINGS = ComputePipeline.MAX_BINDINGS;
 
 	private final VulkanDevice device;
 	private final String label;
@@ -69,14 +69,21 @@ public final class VkComputePipeline implements ComputePipeline {
 					"create shader module for " + description.label());
 			long shaderModule = modulePtr[0];
 
-			// One set, every binding a storage buffer, flagged for push descriptors so nothing has
-			// to be allocated per frame.
+			// One set, flagged for push descriptors so nothing has to be allocated per frame. The
+			// low bindings are storage buffers and the high ones combined image samplers, because a
+			// descriptor set layout fixes each binding's type when the pipeline is built -- they
+			// cannot be decided at bind time, so the split is a convention the shaders share.
+			//
+			// Declaring bindings a shader never uses is allowed and costs nothing; what is not
+			// allowed is pushing a descriptor whose type disagrees with the layout.
 			VkDescriptorSetLayoutBinding.Buffer bindings =
 					VkDescriptorSetLayoutBinding.calloc(MAX_BINDINGS, stack);
 			for (int i = 0; i < MAX_BINDINGS; i++) {
 				bindings.get(i)
 						.binding(i)
-						.descriptorType(VK10.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+						.descriptorType(i < ComputePipeline.FIRST_IMAGE_BINDING
+								? VK10.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+								: VK10.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
 						.descriptorCount(1)
 						.stageFlags(VK10.VK_SHADER_STAGE_COMPUTE_BIT);
 			}

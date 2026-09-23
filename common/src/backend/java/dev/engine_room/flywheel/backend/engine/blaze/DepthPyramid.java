@@ -123,6 +123,9 @@ public class DepthPyramid implements AutoCloseable {
 
 	private @Nullable RenderPipeline pipeline;
 
+	/** Whether the reduction pipeline compiled, for anything asking why the chain is empty. */
+	private boolean valid;
+
 	/**
 	 * One level, copied out every frame so anything outside the frame can look at it.
 	 *
@@ -157,6 +160,15 @@ public class DepthPyramid implements AutoCloseable {
 
 	public int height() {
 		return height;
+	}
+
+	/** The view of one level, for a shader that wants to sample it. */
+	public @Nullable GpuTextureView levelView(int level) {
+		return level >= 0 && level < levels ? levelViews[level] : null;
+	}
+
+	public boolean pipelineValid() {
+		return valid;
 	}
 
 	public int levels() {
@@ -194,7 +206,12 @@ public class DepthPyramid implements AutoCloseable {
 
 				pass.setPipeline(reduce);
 				pass.bindTexture("Source", source, nearest);
-				pass.draw(0, 3, 0, 1);
+				// vertexCount, instanceCount, firstVertex, firstInstance -- the order vkCmdDraw
+				// takes them in, which RenderPass.draw passes straight through. Written as
+				// (0, 3, 0, 1) at first, on the assumption that it began with a first index: that
+				// asks for zero vertices and three instances starting at instance one. It draws
+				// nothing, reports nothing wrong, and leaves a pyramid of zeroes behind.
+				pass.draw(3, 1, 0, 0);
 			}
 		}
 	}
@@ -359,6 +376,12 @@ public class DepthPyramid implements AutoCloseable {
 							ColorTargetState.WRITE_ALL))
 					.withCull(false)
 					.build();
+
+			// Checked, because Blaze3D compiles lazily and an invalid pipeline is not discovered
+			// until a draw uses it -- and a draw that never happens writes nothing and says nothing.
+			valid = RenderSystem.getDevice()
+					.precompilePipeline(pipeline)
+					.isValid();
 		}
 
 		return pipeline;

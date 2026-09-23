@@ -10,6 +10,24 @@ import java.util.Map;
  * are non-public. Compute gets its own type rather than a fight.
  */
 public interface ComputePipeline extends AutoCloseable {
+	/**
+	 * How many descriptor slots a compute shader gets, buffers and images together.
+	 *
+	 * <p>Eight, which is what {@code VkComputePipeline} has always declared and is exactly the
+	 * number of storage buffers Flywheel's indirect path binds at once.
+	 */
+	int MAX_BINDINGS = 8;
+
+	/**
+	 * The first slot that holds a sampled image rather than a storage buffer.
+	 *
+	 * <p>A Vulkan descriptor set layout fixes the type of every binding when the pipeline is built,
+	 * so the two kinds cannot be mixed freely at bind time -- the split has to be a convention both
+	 * the shader and the pass agree on in advance. Six buffers and two images, because the busiest
+	 * shader here binds four buffers.
+	 */
+	int FIRST_IMAGE_BINDING = 6;
+
 	String label();
 
 	/** The workgroup size the shader declared, for sizing dispatches. */

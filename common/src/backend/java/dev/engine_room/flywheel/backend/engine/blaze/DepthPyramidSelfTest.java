@@ -13,6 +13,7 @@ import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
 
 import dev.engine_room.flywheel.backend.compute.Compute;
 import dev.engine_room.flywheel.backend.compute.BarrierScope;
@@ -153,7 +154,8 @@ public final class DepthPyramidSelfTest {
 
 		try {
 			lines.add("pyramid is " + pyramid.width() + "x" + pyramid.height() + " with "
-					+ pyramid.levels() + " levels");
+					+ pyramid.levels() + " levels, reduction pipeline valid: "
+					+ pyramid.pipelineValid());
 
 			// A fine level, and the reason is the whole character of a depth pyramid.
 			//
@@ -166,7 +168,7 @@ public final class DepthPyramidSelfTest {
 			//
 			// Level two covers four pixels square, which is fine enough that solid ground in front of
 			// the camera shows up as ground.
-			int level = pyramid.sampledLevel();
+			int level = Math.min(2, pyramid.levels() - 1);
 			Stats stats = read(pyramid, lines);
 			if (stats == null) {
 				return new Result(false, lines);
@@ -219,28 +221,37 @@ public final class DepthPyramidSelfTest {
 	private static final String SCAN = """
 			layout(local_size_x = 64) in;
 
-			layout(std430, FLW_SET(0) binding = 0) readonly buffer Pyramid {
-				float _flw_depth[];
-			};
-
-			layout(std430, FLW_SET(0) binding = 1) buffer Summary {
+			layout(std430, FLW_SET(0) binding = 0) buffer Summary {
 				uint _flw_min;
 				uint _flw_max;
-				uint _flw_nearer;
+				uint _flw_width;
 				uint _flw_count;
 			};
 
-			layout(std430, FLW_SET(0) binding = 2) readonly buffer Params {
-				uint _flw_texels;
-			};
+			// Sampled, not copied. A compute shader here could only read buffers until this
+			// backend's compute layer learned to bind an image, and the copy that would have filled
+			// a buffer instead -- copyTextureToBuffer -- never delivers its data on 26.2.
+			layout(FLW_SET(0) binding = 6) uniform sampler2D _flw_pyramid;
 
 			void main() {
+				// Counted before anything can return, so "the dispatch never ran" and "the texture
+				// came back empty" are different answers rather than the same zero.
+				atomicAdd(_flw_count, 1u);
+
+				ivec2 size = textureSize(_flw_pyramid, 0);
+
+				// Recorded for the same reason: a binding that did not take reports a size of zero,
+				// and then every invocation returns without touching anything.
+				atomicMax(_flw_width, uint(size.x));
+
+				uint total = uint(size.x * size.y);
 				uint i = gl_GlobalInvocationID.x;
-				if (i >= _flw_texels) {
+				if (i >= total) {
 					return;
 				}
 
-				float d = _flw_depth[i];
+				ivec2 at = ivec2(int(i) % size.x, int(i) / size.x);
+				float d = texelFetch(_flw_pyramid, at, 0).r;
 
 				// Compared as bit patterns, which is exact for non-negative floats: IEEE 754 orders
 				// them the same way the integers order. A depth is never negative, so this holds.
@@ -248,12 +259,6 @@ public final class DepthPyramidSelfTest {
 
 				atomicMin(_flw_min, bits);
 				atomicMax(_flw_max, bits);
-				atomicAdd(_flw_count, 1u);
-
-				// Reversed depth: the far plane is zero, so anything above it is real geometry.
-				if (d > 1.0e-6) {
-					atomicAdd(_flw_nearer, 1u);
-				}
 			}
 			""";
 
@@ -266,17 +271,20 @@ public final class DepthPyramidSelfTest {
 	 * renderer starts one every frame instead, and by the time this runs an earlier one has landed.
 	 */
 	private static @Nullable Stats read(DepthPyramid pyramid, List<String> lines) {
-		int level = pyramid.sampledLevel();
-		GpuBuffer pyramidBuffer = pyramid.storageOf(level);
-		int texels = pyramid.storageTexels();
+		int level = Math.min(2, pyramid.levels() - 1);
+		GpuTextureView view = pyramid.levelView(level);
 
-		if (pyramidBuffer == null || texels == 0) {
-			lines.add("the pyramid has no level copied into a storage buffer");
+		if (view == null) {
+			lines.add("the pyramid has no view for level " + level);
 			return null;
 		}
 
-		ComputeBackend gpu = Compute.backend();
+		int texels = pyramid.texture()
+				.getWidth(level)
+				* pyramid.texture()
+						.getHeight(level);
 
+		ComputeBackend gpu = Compute.backend();
 		ComputePipeline scan = gpu.createPipeline(
 				ComputePipeline.Description.of("flywheel pyramid scan", SCAN));
 
@@ -290,8 +298,6 @@ public final class DepthPyramidSelfTest {
 		try (ComputePipeline pipeline = scan;
 				GpuBuffer summary = RenderSystem.getDevice()
 						.createBuffer(() -> "flywheel pyramid summary", storage, 4L * Integer.BYTES);
-				GpuBuffer params = RenderSystem.getDevice()
-						.createBuffer(() -> "flywheel pyramid scan params", storage, Integer.BYTES);
 				GpuBuffer readback = RenderSystem.getDevice()
 						.createBuffer(() -> "flywheel pyramid summary readback",
 								GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST,
@@ -307,22 +313,13 @@ public final class DepthPyramidSelfTest {
 			seed.putInt(12, 0);
 			Staging.upload(summary.slice(), seed);
 
-			ByteBuffer count = ByteBuffer.allocateDirect(Integer.BYTES)
-					.order(ByteOrder.nativeOrder());
-			count.putInt(0, texels);
-			Staging.upload(params.slice(), count);
+			var sampler = RenderSystem.getSamplerCache()
+					.getClampToEdge(com.mojang.blaze3d.textures.FilterMode.NEAREST);
 
 			try (ComputePass pass = gpu.beginPass("flywheel pyramid scan")) {
-				// Between the texture-to-buffer copy above and the reads below. Without it the
-				// dispatch may run before the copy lands, and it reads a buffer that has nothing in
-				// it -- which looks exactly like a copy that never happened, and had me concluding
-				// that copyTextureToBuffer does not work at all.
-				pass.barrier(BarrierScope.STORAGE | BarrierScope.BUFFER_UPDATE);
-
 				pass.setPipeline(pipeline);
-				pass.bindStorageBuffer(0, pyramidBuffer.slice());
-				pass.bindStorageBuffer(1, summary.slice());
-				pass.bindStorageBuffer(2, params.slice());
+				pass.bindStorageBuffer(0, summary.slice());
+				pass.bindTexture(ComputePipeline.FIRST_IMAGE_BINDING, view, sampler);
 				pass.dispatch((texels + 63) / 64, 1, 1);
 				pass.barrier(BarrierScope.STORAGE);
 			}
@@ -338,21 +335,35 @@ public final class DepthPyramidSelfTest {
 				return null;
 			}
 
-			try (GpuBufferSlice.MappedView view = readback.map(true, false)) {
-				IntBuffer values = view.data()
+			try (GpuBufferSlice.MappedView mapped = readback.map(true, false)) {
+				IntBuffer values = mapped.data()
 						.asIntBuffer();
 
-				int scanned = values.get(3);
-				if (scanned == 0) {
-					lines.add("the scan saw no texels at all, so the dispatch did not run");
+				int invocations = values.get(3);
+				int reportedWidth = values.get(2);
+				lines.add("scan ran " + invocations + " invocations; the shader saw a texture "
+						+ reportedWidth + " wide");
+
+				if (invocations == 0) {
+					lines.add("the dispatch did not run at all");
 					return null;
 				}
 
-				return new Stats(scanned, Float.intBitsToFloat(values.get(0)),
-						Float.intBitsToFloat(values.get(1)), values.get(2));
+				if (reportedWidth == 0) {
+					lines.add("the shader saw a texture of width zero, so the image binding never "
+							+ "reached it");
+					return null;
+				}
+
+				float min = Float.intBitsToFloat(values.get(0));
+				float max = Float.intBitsToFloat(values.get(1));
+
+				// Counted here rather than in the shader: the summary has four slots and the width
+				// probe needed one of them.
+				return new Stats(texels, min, max, max > 1.0e-6f ? 1 : 0);
 			}
 		} catch (Exception e) {
-			lines.add("THREW while scanning the level on the GPU: " + e);
+			lines.add("THREW while scanning the pyramid: " + e);
 			return null;
 		}
 	}
