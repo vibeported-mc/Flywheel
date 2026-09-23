@@ -10,6 +10,7 @@
     "LightingMixin",
     "OptionsMixin",
     "RenderSystemMixin",
+    "VulkanConstMixin",
     "light.LayerLightSectionStorageAccessor",
     "light.LightEngineAccessor",
     "light.SkyDataLayerStorageMapAccessor",
