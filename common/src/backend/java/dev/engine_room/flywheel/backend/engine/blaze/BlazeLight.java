@@ -10,6 +10,8 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderSystem;
 
+import dev.blaze3dx.buffer.Staging;
+
 import dev.engine_room.flywheel.backend.engine.LightStorage;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 

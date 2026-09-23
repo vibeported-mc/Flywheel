@@ -11,14 +11,16 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderSystem;
 
+import dev.blaze3dx.buffer.Staging;
+import dev.blaze3dx.compute.BarrierScope;
+import dev.blaze3dx.compute.Blaze3dxBufferUsage;
+import dev.blaze3dx.compute.Compute;
+import dev.blaze3dx.compute.ComputeBackend;
+import dev.blaze3dx.compute.ComputePass;
+import dev.blaze3dx.compute.ComputePipeline;
+
 import dev.engine_room.flywheel.api.instance.InstanceHandle;
 import dev.engine_room.flywheel.api.instance.InstanceType;
-import dev.engine_room.flywheel.backend.compute.BarrierScope;
-import dev.engine_room.flywheel.backend.compute.Compute;
-import dev.engine_room.flywheel.backend.compute.ComputeBackend;
-import dev.engine_room.flywheel.backend.compute.ComputePass;
-import dev.engine_room.flywheel.backend.compute.ComputePipeline;
-import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
 import dev.engine_room.flywheel.lib.instance.InstanceTypes;
 import dev.engine_room.flywheel.lib.instance.TransformedInstance;
 import dev.engine_room.flywheel.lib.math.MoreMath;
@@ -97,9 +99,9 @@ public final class LayoutSelfTest {
 		MemoryBlock block = MemoryBlock.malloc(stride);
 
 		try (GpuBuffer instances = device.createBuffer(() -> "flywheel layout selftest instance",
-				FlwBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST, stride);
+				Blaze3dxBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST, stride);
 				GpuBuffer results = device.createBuffer(() -> "flywheel layout selftest results",
-						FlwBufferUsage.STORAGE | GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST,
+						Blaze3dxBufferUsage.STORAGE | GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST,
 						(long) RESULTS * Float.BYTES)) {
 
 			type.writer()

@@ -12,11 +12,13 @@ import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.shaders.UniformType;
 import com.mojang.blaze3d.systems.RenderSystem;
 
+import dev.blaze3dx.shader.GeneratedShaders;
+import dev.engine_room.flywheel.lib.material.LightShaders;
+
 import dev.engine_room.flywheel.api.instance.InstanceType;
 import dev.engine_room.flywheel.lib.instance.InstanceTypes;
 import dev.engine_room.flywheel.lib.material.CutoutShaders;
 import dev.engine_room.flywheel.lib.material.FogShaders;
-import dev.engine_room.flywheel.lib.material.LightShaders;
 import dev.engine_room.flywheel.lib.math.MoreMath;
 import net.minecraft.resources.Identifier;
 

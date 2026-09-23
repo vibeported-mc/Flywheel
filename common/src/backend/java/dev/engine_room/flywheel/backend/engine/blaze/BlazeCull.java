@@ -19,14 +19,16 @@ import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTextureView;
 
+import dev.blaze3dx.buffer.DepthPyramid;
+import dev.blaze3dx.compute.BarrierScope;
+import dev.blaze3dx.compute.Blaze3dxBufferUsage;
+import dev.blaze3dx.compute.Compute;
+import dev.blaze3dx.compute.ComputeBackend;
+import dev.blaze3dx.compute.ComputePass;
+import dev.blaze3dx.compute.ComputePipeline;
+
 import dev.engine_room.flywheel.api.backend.RenderContext;
 import dev.engine_room.flywheel.backend.FlwBackend;
-import dev.engine_room.flywheel.backend.compute.BarrierScope;
-import dev.engine_room.flywheel.backend.compute.Compute;
-import dev.engine_room.flywheel.backend.compute.ComputeBackend;
-import dev.engine_room.flywheel.backend.compute.ComputePass;
-import dev.engine_room.flywheel.backend.compute.ComputePipeline;
-import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
 import dev.engine_room.flywheel.lib.math.MoreMath;
 import net.minecraft.core.Vec3i;
 
@@ -54,10 +56,11 @@ public class BlazeCull implements AutoCloseable {
 	private static final int GROUP_SIZE = 64;
 
 	/**
-	 * 6 frustum planes, the bounding sphere, the camera, the view-projection, the pyramid's shape,
-	 * and a count padded to a vec4.
+	 * 6 frustum planes, the bounding sphere, the camera, the view-projection, the environment pose,
+	 * the pyramid's shape, and a count padded to a vec4.
 	 */
 	private static final int PARAMS_BYTES = (6 + 1 + 1) * 4 * Float.BYTES
+			+ 16 * Float.BYTES
 			+ 16 * Float.BYTES
 			+ 2 * 4 * Float.BYTES;
 
@@ -100,7 +103,8 @@ public class BlazeCull implements AutoCloseable {
 	 * Vulkan and an out-of-band program bind on OpenGL, and neither wants opening per instancer.
 	 */
 	public Set<BlazeInstancer<?>> dispatch(List<BlazeInstancer<?>> instancers, RenderContext context,
-			Vec3i origin, DepthPyramid depthPyramid) {
+			Vec3i origin, DepthPyramid depthPyramid, BlazeEnvironments environments,
+			dev.engine_room.flywheel.backend.engine.embed.EnvironmentStorage environmentStorage) {
 		GpuTextureView pyramid = depthPyramid.fullView();
 		Set<BlazeInstancer<?>> culled = Collections.newSetFromMap(new IdentityHashMap<>());
 
@@ -119,7 +123,8 @@ public class BlazeCull implements AutoCloseable {
 			if (cullerFor(instancer) == null) {
 				continue;
 			}
-			if (instancer.prepareCull(planes, context, origin, depthPyramid)) {
+			if (instancer.prepareCull(planes, context, origin, depthPyramid, environments,
+					environmentStorage)) {
 				ready.add(instancer);
 			}
 		}
@@ -328,11 +333,11 @@ public class BlazeCull implements AutoCloseable {
 
 	/** Buffers one instancer needs to be culled and drawn indirectly. */
 	static final class Resources implements AutoCloseable {
-		private static final int VISIBLE_USAGE = FlwBufferUsage.STORAGE
+		private static final int VISIBLE_USAGE = Blaze3dxBufferUsage.STORAGE
 				| GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER | GpuBuffer.USAGE_COPY_DST;
-		private static final int COMMAND_USAGE = FlwBufferUsage.STORAGE
+		private static final int COMMAND_USAGE = Blaze3dxBufferUsage.STORAGE
 				| GpuBuffer.USAGE_INDIRECT_PARAMETERS | GpuBuffer.USAGE_COPY_DST;
-		private static final int PLAIN_USAGE = FlwBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST;
+		private static final int PLAIN_USAGE = Blaze3dxBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST;
 
 		@Nullable GpuBuffer visible;
 		@Nullable GpuBuffer counts;
@@ -396,8 +401,8 @@ public class BlazeCull implements AutoCloseable {
 
 	static ByteBuffer paramsFor(Vector4f[] planes, org.joml.Vector4fc boundingSphere,
 			float cameraX, float cameraY, float cameraZ, int instanceCount,
-			org.joml.Matrix4fc viewProjection, float pyramidWidth, float pyramidHeight,
-			float pyramidLevels) {
+			org.joml.Matrix4fc viewProjection, org.joml.Matrix4fc environmentPose,
+			float pyramidWidth, float pyramidHeight, float pyramidLevels) {
 		ByteBuffer data = ByteBuffer.allocateDirect(PARAMS_BYTES)
 				.order(ByteOrder.nativeOrder());
 
@@ -420,6 +425,15 @@ public class BlazeCull implements AutoCloseable {
 
 		float[] matrix = new float[16];
 		viewProjection.get(matrix);
+		for (float element : matrix) {
+			data.putFloat(element);
+		}
+
+		// Where the instance's own space currently is. Identity for anything in the world, and the
+		// contraption's pose for anything riding one -- without it a moving contraption's parts are
+		// tested against the frustum in the space they were assembled in rather than the space they
+		// are drawn in, and vanish whenever the two disagree.
+		environmentPose.get(matrix);
 		for (float element : matrix) {
 			data.putFloat(element);
 		}

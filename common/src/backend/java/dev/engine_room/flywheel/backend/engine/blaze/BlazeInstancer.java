@@ -10,9 +10,12 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderSystem;
 
+import dev.blaze3dx.buffer.DepthPyramid;
+import dev.blaze3dx.buffer.Staging;
+import dev.blaze3dx.compute.Blaze3dxBufferUsage;
+
 import dev.engine_room.flywheel.api.instance.Instance;
 import dev.engine_room.flywheel.api.instance.InstanceWriter;
-import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
 import dev.engine_room.flywheel.backend.engine.BaseInstancer;
 import dev.engine_room.flywheel.backend.engine.InstancerKey;
 import dev.engine_room.flywheel.lib.math.MoreMath;
@@ -37,7 +40,7 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 	 * can be written. The combination is the point: Blaze3D has a bit for the second and the third
 	 * and no word at all for the first.
 	 */
-	private static final int USAGE = FlwBufferUsage.STORAGE
+	private static final int USAGE = Blaze3dxBufferUsage.STORAGE
 			| GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER | GpuBuffer.USAGE_COPY_DST;
 
 	private final int instanceStride;
@@ -56,7 +59,6 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 				.boundingSphere();
 	}
 
-
 	private final BlazeCull.Resources cull = new BlazeCull.Resources();
 
 	/** The model's bounding sphere, which the cull pass transforms per instance. */
@@ -67,9 +69,13 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 	 *
 	 * @return false when there is nothing to cull, in which case nothing is dispatched for it
 	 */
+	/** Reused so a frame of instancers does not allocate one matrix apiece. */
+	private final org.joml.Matrix4f cullPose = new org.joml.Matrix4f();
+
 	public boolean prepareCull(org.joml.Vector4f[] planes,
 			dev.engine_room.flywheel.api.backend.RenderContext context, net.minecraft.core.Vec3i origin,
-			DepthPyramid pyramid) {
+			DepthPyramid pyramid, BlazeEnvironments environments,
+			dev.engine_room.flywheel.backend.engine.embed.EnvironmentStorage environmentStorage) {
 		int count = instanceCount();
 		int draws = drawCount();
 
@@ -90,6 +96,7 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 		Staging.upload(cull.cullParams.slice(), BlazeCull.paramsFor(planes, boundingSphere,
 				(float) (camera.x - origin.getX()), (float) (camera.y - origin.getY()),
 				(float) (camera.z - origin.getZ()), count, context.viewProjection(),
+				environments.poseOf(environmentStorage, environment.matrixIndex(), cullPose),
 				pyramid.width(), pyramid.height(),
 				// Zero levels turns the occlusion test off, which is what the first frame of a
 				// session gets: there is no previous frame to have a pyramid of.

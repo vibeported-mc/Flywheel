@@ -6,6 +6,8 @@ import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.shaders.ShaderType;
 import com.mojang.blaze3d.systems.RenderSystem;
 
+import dev.blaze3dx.shader.GeneratedShaders;
+
 import dev.engine_room.flywheel.backend.FlwBackend;
 import dev.engine_room.flywheel.lib.math.MoreMath;
 import net.minecraft.resources.Identifier;

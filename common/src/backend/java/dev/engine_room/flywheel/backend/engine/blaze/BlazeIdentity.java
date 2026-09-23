@@ -8,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderSystem;
+import dev.blaze3dx.buffer.Staging;
 
 /**
  * The list {@code 0, 1, 2, ...}, as a texel buffer, shared by everything that is not being culled.

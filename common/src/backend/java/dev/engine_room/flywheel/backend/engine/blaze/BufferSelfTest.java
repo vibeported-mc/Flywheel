@@ -1,5 +1,8 @@
 package dev.engine_room.flywheel.backend.engine.blaze;
 
+import dev.blaze3dx.buffer.Staging;
+import dev.blaze3dx.buffer.StorageBuffer;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
@@ -11,8 +14,8 @@ import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderSystem;
 
-import dev.engine_room.flywheel.backend.compute.Compute;
-import dev.engine_room.flywheel.backend.compute.ComputeBackend;
+import dev.blaze3dx.compute.Compute;
+import dev.blaze3dx.compute.ComputeBackend;
 
 /**
  * Does a {@link StorageBuffer} keep what was in it when it grows?

@@ -22,6 +22,10 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTextureView;
 
+import dev.blaze3dx.buffer.DepthPyramid;
+import dev.blaze3dx.compute.Blaze3dxBufferUsage;
+import dev.blaze3dx.shader.GeneratedShaders;
+
 import dev.engine_room.flywheel.api.backend.Engine;
 import dev.engine_room.flywheel.api.backend.RenderContext;
 import dev.engine_room.flywheel.api.instance.Instance;
@@ -34,7 +38,6 @@ import dev.engine_room.flywheel.lib.material.CutoutShaders;
 import dev.engine_room.flywheel.lib.material.FogShaders;
 import dev.engine_room.flywheel.lib.material.LightShaders;
 import dev.engine_room.flywheel.backend.FlwBackend;
-import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
 import dev.engine_room.flywheel.backend.engine.AbstractInstancer;
 import dev.engine_room.flywheel.backend.engine.DrawManager;
 import dev.engine_room.flywheel.backend.engine.InstanceHandleImpl;
@@ -161,7 +164,8 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 
 		// Before the render pass, not inside it. A compute dispatch is illegal inside a render pass on
 		// Vulkan, and on OpenGL it would bind a program out from under the draws already recorded.
-		submit(drawable, cull.dispatch(drawable, context, renderOrigin, depthPyramid));
+		submit(drawable, cull.dispatch(drawable, context, renderOrigin, depthPyramid, environments,
+				environmentStorage));
 	}
 
 	/**
@@ -636,6 +640,6 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	}
 
 	static int storageUsage() {
-		return FlwBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST;
+		return Blaze3dxBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST;
 	}
 }

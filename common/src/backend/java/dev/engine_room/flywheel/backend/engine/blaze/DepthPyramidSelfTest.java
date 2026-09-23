@@ -15,12 +15,15 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 
-import dev.engine_room.flywheel.backend.compute.Compute;
-import dev.engine_room.flywheel.backend.compute.BarrierScope;
-import dev.engine_room.flywheel.backend.compute.ComputeBackend;
-import dev.engine_room.flywheel.backend.compute.ComputePass;
-import dev.engine_room.flywheel.backend.compute.ComputePipeline;
-import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
+import dev.blaze3dx.buffer.DepthPyramid;
+import dev.blaze3dx.buffer.Staging;
+import dev.blaze3dx.compute.BarrierScope;
+import dev.blaze3dx.compute.Blaze3dxBufferUsage;
+import dev.blaze3dx.compute.Compute;
+import dev.blaze3dx.compute.ComputeBackend;
+import dev.blaze3dx.compute.ComputePass;
+import dev.blaze3dx.compute.ComputePipeline;
+
 import net.minecraft.client.Minecraft;
 
 /**
@@ -304,7 +307,7 @@ public final class DepthPyramidSelfTest {
 			return null;
 		}
 
-		int storage = FlwBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_COPY_SRC;
+		int storage = Blaze3dxBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_COPY_SRC;
 
 		try (ComputePipeline pipeline = scan;
 				GpuBuffer summary = RenderSystem.getDevice()

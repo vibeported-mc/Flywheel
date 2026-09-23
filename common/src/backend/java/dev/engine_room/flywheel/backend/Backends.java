@@ -1,8 +1,9 @@
 package dev.engine_room.flywheel.backend;
 
+import dev.blaze3dx.compute.Compute;
+
 import dev.engine_room.flywheel.api.backend.Backend;
 import dev.engine_room.flywheel.backend.compile.IndirectPrograms;
-import dev.engine_room.flywheel.backend.compute.Compute;
 import dev.engine_room.flywheel.backend.compile.InstancingPrograms;
 import dev.engine_room.flywheel.backend.engine.EngineImpl;
 import dev.engine_room.flywheel.backend.engine.blaze.BlazeDrawManager;

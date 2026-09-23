@@ -2,6 +2,8 @@ package dev.engine_room.flywheel.backend.engine.blaze;
 
 import java.io.IOException;
 
+import dev.blaze3dx.shader.GeneratedShaders;
+
 import dev.engine_room.flywheel.api.instance.InstanceType;
 import dev.engine_room.flywheel.api.material.CardinalLightingMode;
 import net.minecraft.resources.Identifier;

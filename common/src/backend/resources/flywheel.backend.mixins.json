@@ -5,13 +5,10 @@
   "client": [
     "AbstractClientPlayerAccessor",
     "GlStateManagerMixin",
-    "GpuDeviceAccessor",
     "LevelRendererAccessor",
     "LightingMixin",
     "OptionsMixin",
     "RenderSystemMixin",
-    "ShaderManagerCompilationCacheMixin",
-    "VulkanConstMixin",
     "light.LayerLightSectionStorageAccessor",
     "light.LightEngineAccessor",
     "light.SkyDataLayerStorageMapAccessor",

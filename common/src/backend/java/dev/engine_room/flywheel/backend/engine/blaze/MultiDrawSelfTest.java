@@ -23,12 +23,13 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 
-import dev.engine_room.flywheel.backend.compute.BarrierScope;
-import dev.engine_room.flywheel.backend.compute.Compute;
-import dev.engine_room.flywheel.backend.compute.ComputeBackend;
-import dev.engine_room.flywheel.backend.compute.ComputePass;
-import dev.engine_room.flywheel.backend.compute.ComputePipeline;
-import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
+import dev.blaze3dx.compute.BarrierScope;
+import dev.blaze3dx.compute.Blaze3dxBufferUsage;
+import dev.blaze3dx.compute.Compute;
+import dev.blaze3dx.compute.ComputeBackend;
+import dev.blaze3dx.compute.ComputePass;
+import dev.blaze3dx.compute.ComputePipeline;
+
 import net.minecraft.resources.Identifier;
 
 /**
@@ -136,9 +137,9 @@ public final class MultiDrawSelfTest {
 				GpuBuffer models = device.createBuffer(() -> "flywheel multi probe models",
 						GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER | GpuBuffer.USAGE_COPY_DST, models());
 				GpuBuffer drawParams = device.createBuffer(() -> "flywheel multi probe draw params",
-						FlwBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST, drawParams(pool));
+						Blaze3dxBufferUsage.STORAGE | GpuBuffer.USAGE_COPY_DST, drawParams(pool));
 				GpuBuffer commands = device.createBuffer(() -> "flywheel multi probe commands",
-						FlwBufferUsage.STORAGE | GpuBuffer.USAGE_INDIRECT_PARAMETERS
+						Blaze3dxBufferUsage.STORAGE | GpuBuffer.USAGE_INDIRECT_PARAMETERS
 								| GpuBuffer.USAGE_COPY_DST,
 						(long) MODELS * COMMAND_INTS * Integer.BYTES);
 				GpuTexture target = device.createTexture(() -> "flywheel multi probe target",

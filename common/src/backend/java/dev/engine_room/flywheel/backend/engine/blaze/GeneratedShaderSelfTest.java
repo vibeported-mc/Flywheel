@@ -21,7 +21,9 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 
-import dev.engine_room.flywheel.backend.compute.Compute;
+import dev.blaze3dx.compute.Compute;
+import dev.blaze3dx.shader.GeneratedShaders;
+
 import net.minecraft.resources.Identifier;
 
 /**

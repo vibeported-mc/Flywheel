@@ -23,11 +23,12 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 
-import dev.engine_room.flywheel.backend.compute.Compute;
-import dev.engine_room.flywheel.backend.compute.ComputeBackend;
-import dev.engine_room.flywheel.backend.compute.ComputePass;
-import dev.engine_room.flywheel.backend.compute.ComputePipeline;
-import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
+import dev.blaze3dx.compute.Blaze3dxBufferUsage;
+import dev.blaze3dx.compute.Compute;
+import dev.blaze3dx.compute.ComputeBackend;
+import dev.blaze3dx.compute.ComputePass;
+import dev.blaze3dx.compute.ComputePipeline;
+
 import net.minecraft.resources.Identifier;
 
 /**
@@ -132,7 +133,7 @@ public final class IndirectDrawSelfTest {
 				// Storage so compute can write it, indirect parameters so the draw can read it. The
 				// same buffer in both roles is the point of the exercise.
 				GpuBuffer commands = device.createBuffer(() -> "flywheel indirect probe commands",
-						FlwBufferUsage.STORAGE | GpuBuffer.USAGE_INDIRECT_PARAMETERS
+						Blaze3dxBufferUsage.STORAGE | GpuBuffer.USAGE_INDIRECT_PARAMETERS
 								| GpuBuffer.USAGE_COPY_DST,
 						(long) COMMAND_INTS * Integer.BYTES);
 				GpuTexture target = device.createTexture(() -> "flywheel indirect probe target",
@@ -158,8 +159,8 @@ public final class IndirectDrawSelfTest {
 					// another shader. The wrong scope here is the classic way to get a draw that
 					// reads the command buffer as it was before the dispatch: all zeros, so zero
 					// instances, so a blank picture and no error anywhere.
-					pass.barrier(dev.engine_room.flywheel.backend.compute.BarrierScope.STORAGE
-							| dev.engine_room.flywheel.backend.compute.BarrierScope.INDIRECT);
+					pass.barrier(dev.blaze3dx.compute.BarrierScope.STORAGE
+							| dev.blaze3dx.compute.BarrierScope.INDIRECT);
 				}
 			}
 

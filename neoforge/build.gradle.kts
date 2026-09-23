@@ -89,6 +89,7 @@ backend.dependsOnLayers(api, lib)
 main.dependsOnLayers(api, lib, backend)
 
 repositories {
+    mavenLocal()
     mavenCentral()
     maven("https://api.modrinth.com/maven") {
         name = "Modrinth"
@@ -102,6 +103,18 @@ dependencies {
     // Minecraft 26.2 removed net.minecraft.MethodsReturnNonnullByDefault and friends in favor of
     // JSpecify, so that is what the generated package-info files (and our own @Nullable) use.
     layers.forEach { add(it.compileOnlyConfigurationName, "org.jspecify:jspecify:1.0.0") }
+
+    // The capabilities Blaze3D 26.2 does not have -- compute, storage buffers, barriers -- on both
+    // backends. Shared with Veil rather than vendored, and nested by a version *range* so that two
+    // mods carrying it resolve to one copy: its VulkanConstMixin teaches Blaze3D a storage-usage bit
+    // that is derived at runtime, and two copies deriving it independently is how buffers get
+    // created without it.
+    val blaze3dx = "dev.blaze3dx:blaze3dx-neoforge-$artifactMcVersion:${property("blaze3dx_version")}"
+    layers.forEach { add(it.compileOnlyConfigurationName, blaze3dx) }
+    add(main.runtimeOnlyConfigurationName, blaze3dx)
+    jarJar(implementation(blaze3dx) {
+        version { require(property("blaze3dx_maven_version_range") as String) }
+    })
 
     // Flywheel's compat layers talk to these directly, but never require them at runtime.
     add(main.compileOnlyConfigurationName, "maven.modrinth:sodium:${property("sodium_version")}-neoforge")

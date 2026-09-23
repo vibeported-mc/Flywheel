@@ -10,7 +10,7 @@ import com.mojang.blaze3d.opengl.GlTexture;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
 
-import dev.engine_room.flywheel.backend.mixin.GpuDeviceAccessor;
+import dev.blaze3dx.Blaze3dx;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -45,7 +45,10 @@ public final class GlRenderTargets {
 	}
 
 	public static int fbo(RenderTarget target) {
-		GlDevice device = (GlDevice) ((GpuDeviceAccessor) RenderSystem.getDevice()).flywheel$backend();
+		// Through blaze3dx rather than the accessor directly: it owns the mixin that reaches
+		// GpuDevice's private backend field now, and one seam onto Minecraft internals is the point
+		// of the library.
+		GlDevice device = Blaze3dx.glDevice();
 		return device.frameBufferCache()
 				.getFbo(device.directStateAccess(), Collections.singletonList((GlTexture) target.getColorTexture()), (GlTexture) target.getDepthTexture());
 	}

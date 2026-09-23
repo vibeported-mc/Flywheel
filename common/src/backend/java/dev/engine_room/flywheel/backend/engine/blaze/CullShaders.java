@@ -61,6 +61,9 @@ public final class CullShaders {
 				vec4 _flw_boundingSphere;
 				vec4 _flw_cameraPos;
 				mat4 _flw_viewProjection;
+				// Where this instancer's space currently is: identity in the world, and the
+				// contraption's pose for anything riding one.
+				mat4 _flw_environmentPose;
 				// xy: the size of the pyramid's first level, z: how many levels, w: whether to use
 				// it at all. Zero in w turns occlusion culling off without a second shader.
 				vec4 _flw_pyramid;
@@ -82,6 +85,22 @@ public final class CullShaders {
 	 * material, and nothing downstream cares which came first.
 	 */
 	private static final String MAIN = """
+			/**
+			 * Moves a bounding sphere by a matrix, growing it by the matrix's largest axis scale.
+			 *
+			 * The largest rather than an average: a sphere that no longer contains its geometry culls
+			 * things that are plainly on screen, where erring large only costs a draw.
+			 */
+			void _flw_transformBoundingSphere(mat4 pose, inout vec3 center, inout float radius) {
+				center = (pose * vec4(center, 1.0)).xyz;
+
+				float x = length(pose[0].xyz);
+				float y = length(pose[1].xyz);
+				float z = length(pose[2].xyz);
+
+				radius *= max(max(x, y), z);
+			}
+
 			bool _flw_inFrustum(vec3 center, float radius) {
 				for (int i = 0; i < 6; i++) {
 					// Positions are relative to the render origin and the planes are relative to the
@@ -199,6 +218,11 @@ public final class CullShaders {
 				vec3 center = _flw_boundingSphere.xyz;
 				float radius = _flw_boundingSphere.w;
 				flw_transformBoundingSphere(instance, center, radius);
+
+				// And then out of this instancer's space into the world, which is the space both the
+				// frustum planes and the depth pyramid are in. Identity for anything not riding a
+				// contraption, so this costs a matrix multiply and changes nothing.
+				_flw_transformBoundingSphere(_flw_environmentPose, center, radius);
 
 				atomicAdd(_flw_tested, 1u);
 

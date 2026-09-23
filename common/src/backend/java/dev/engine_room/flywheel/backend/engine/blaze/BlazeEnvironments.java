@@ -11,6 +11,8 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderSystem;
 
+import dev.blaze3dx.buffer.Staging;
+
 import dev.engine_room.flywheel.backend.engine.embed.EnvironmentStorage;
 
 /**
@@ -54,6 +56,25 @@ public class BlazeEnvironments implements AutoCloseable {
 		for (Map.Entry<Integer, GpuBuffer> entry : buffers.entrySet()) {
 			upload(environments, entry.getKey(), entry.getValue());
 		}
+	}
+
+	/**
+	 * The pose an environment currently puts its instances in, for anything that has to agree with
+	 * the shader about where they are.
+	 *
+	 * <p>Read out of the same arena bytes the uniform is copied from rather than recomposed from the
+	 * environment tree, so the cull pass and the draw cannot disagree -- which they would only do
+	 * intermittently, and only for things in motion.
+	 */
+	public org.joml.Matrix4f poseOf(EnvironmentStorage environments, int matrixIndex,
+			org.joml.Matrix4f dest) {
+		if (matrixIndex == 0) {
+			return dest.identity();
+		}
+
+		return dest.set(MemoryUtil.memByteBuffer(environments.arena.indexToPointer(matrixIndex), 64)
+				.order(ByteOrder.nativeOrder())
+				.asFloatBuffer());
 	}
 
 	public GpuBufferSlice slice(EnvironmentStorage environments, int matrixIndex) {
