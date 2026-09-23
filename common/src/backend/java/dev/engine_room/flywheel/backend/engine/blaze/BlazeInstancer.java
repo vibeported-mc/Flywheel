@@ -52,6 +52,104 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 		instanceStride = MoreMath.align16(type.layout()
 				.byteSize());
 		writer = type.writer();
+		boundingSphere = key.model()
+				.boundingSphere();
+	}
+
+
+	private final BlazeCull.Resources cull = new BlazeCull.Resources();
+
+	/** The model's bounding sphere, which the cull pass transforms per instance. */
+	private final org.joml.Vector4fc boundingSphere;
+
+	/**
+	 * Readies this instancer's cull buffers for the frame.
+	 *
+	 * @return false when there is nothing to cull, in which case nothing is dispatched for it
+	 */
+	public boolean prepareCull(org.joml.Vector4f[] planes, dev.engine_room.flywheel.api.backend.RenderContext context,
+			net.minecraft.core.Vec3i origin) {
+		int count = instanceCount();
+		int draws = drawCount();
+
+		if (count == 0 || draws == 0 || buffer == null) {
+			return false;
+		}
+
+		cull.ensure(count, draws);
+
+		// Zeroed every frame, because the cull pass only ever adds to it. A count left over from
+		// last frame would draw this frame's survivors and last frame's ghosts together, growing
+		// until the buffer ran out.
+		Staging.upload(cull.counts.slice(), java.nio.ByteBuffer.allocateDirect(Integer.BYTES)
+				.order(java.nio.ByteOrder.nativeOrder()));
+
+		var camera = context.camera().pos;
+		Staging.upload(cull.cullParams.slice(), BlazeCull.paramsFor(planes, boundingSphere,
+				(float) (camera.x - origin.getX()), (float) (camera.y - origin.getY()),
+				(float) (camera.z - origin.getZ()), count));
+
+		java.nio.ByteBuffer params = java.nio.ByteBuffer.allocateDirect(draws * 4 * Integer.BYTES)
+				.order(java.nio.ByteOrder.nativeOrder());
+		int at = 0;
+		for (BlazeDraw draw : draws()) {
+			var mesh = draw.mesh();
+			params.putInt(at, mesh.indexCount());
+			params.putInt(at + 4, mesh.firstIndex());
+			params.putInt(at + 8, mesh.baseVertex());
+			params.putInt(at + 12, 0);
+			at += 16;
+		}
+		Staging.upload(cull.drawParams.slice(), params);
+
+		return true;
+	}
+
+	public boolean hasCullResources() {
+		return cull.visible != null && cull.commands != null;
+	}
+
+	/** How many meshes this model draws, and so how many commands the apply pass writes. */
+	public int drawCount() {
+		return draws.size();
+	}
+
+	/** The instance data as a storage buffer, which is how the cull pass reads it. */
+	public GpuBufferSlice storageSlice() {
+		return BlazeCull.sliceOf(buffer);
+	}
+
+	public GpuBufferSlice visibleSlice() {
+		return BlazeCull.sliceOf(cull.visible);
+	}
+
+	public GpuBufferSlice countsSlice() {
+		return BlazeCull.sliceOf(cull.counts);
+	}
+
+	public GpuBufferSlice commandsSlice() {
+		return BlazeCull.sliceOf(cull.commands);
+	}
+
+	/**
+	 * The commands for a run of consecutive draws, which is what one indirect call consumes.
+	 *
+	 * <p>Consecutive in {@link #draws()} order, because that is the order the apply pass wrote them
+	 * in -- the draw index is the command index, and nothing re-sorts between the two.
+	 */
+	public GpuBufferSlice commandsSlice(int first, int count) {
+		if (cull.commands == null) {
+			throw new IllegalStateException("cull resources were not prepared");
+		}
+		return cull.commands.slice(first * BlazeCull.COMMAND_BYTES, count * BlazeCull.COMMAND_BYTES);
+	}
+
+	public GpuBufferSlice drawParamsSlice() {
+		return BlazeCull.sliceOf(cull.drawParams);
+	}
+
+	public GpuBufferSlice cullParamsSlice() {
+		return BlazeCull.sliceOf(cull.cullParams);
 	}
 
 	public int instanceStride() {
@@ -115,6 +213,7 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 			draw.delete();
 		}
 		draws.clear();
+		cull.close();
 	}
 
 	private void grow(long needed) {

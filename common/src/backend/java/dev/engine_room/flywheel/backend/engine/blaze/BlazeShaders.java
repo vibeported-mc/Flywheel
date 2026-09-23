@@ -44,6 +44,7 @@ public final class BlazeShaders {
 
 	private static final String BUFFERS = """
 			uniform usamplerBuffer _flw_instances;
+			uniform usamplerBuffer _flw_visible;
 			uniform usamplerBuffer _flw_lightSections;
 			uniform usamplerBuffer _flw_lightLut;
 			""";
@@ -93,10 +94,12 @@ public final class BlazeShaders {
 
 	private static final String MAIN = """
 			void main() {
-				// Straight by instance id, for now. Once the cull pass is wired this becomes two
-				// hops -- gl_InstanceID counts survivors, a compacted list turns that into the real
-				// instance -- which is the arrangement CullSelfTest already draws correctly.
-				FlwInstance instance = _flw_unpackInstance(uint(gl_InstanceID));
+				// Two hops, because what gets drawn was decided on the GPU. gl_InstanceID counts
+				// survivors of the cull; the compacted list turns that into the real instance. Going
+				// straight to the instance buffer would draw the right *number* of things with the
+				// wrong data, which looks close enough to right to survive a careless glance.
+				uint _flw_index = texelFetch(_flw_visible, gl_InstanceID).r;
+				FlwInstance instance = _flw_unpackInstance(_flw_index);
 
 				flw_vertexPos = vec4(_flw_a_position, 1.0);
 				flw_vertexColor = _flw_a_color;

@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.OptionalDouble;
 
 import org.jspecify.annotations.Nullable;
@@ -42,20 +43,23 @@ import net.minecraft.core.Vec3i;
  * mesh pool holds the geometry, each instancer holds its instances, and once a frame this writes
  * what the GPU needs to draw them and opens one render pass to do it.
  *
+ * <p>The order within a frame matters and is not arbitrary: every upload, then the compute passes
+ * that decide what to draw, then one render pass. Compute cannot be dispatched inside a render pass
+ * on Vulkan, and a staged upload cannot be recorded inside either.
+ *
  * <h2>What this does not do yet</h2>
  *
- * <p>Draws every instance, with no culling pass, and ignores material state, fog, cutout, light and
- * crumbling. That is deliberate and it is temporary: culling, materials and light are each a piece
- * of work with their own failure modes, and putting them in before anything renders at all would
- * mean debugging them all at once against a black screen. The mechanisms for all of them are proven
- * -- {@code CullSelfTest} draws exactly what a compute pass chose -- so what is left is wiring them
- * to this, one at a time, against a picture that already works.
+ * <p>Fog, cutout and crumbling. Order-independent transparency falls back to ordinary blending, so
+ * two overlapping translucent surfaces of Create's can sort wrongly against each other -- visibly
+ * wrong where they overlap and right everywhere else, which is the honest interim.
  */
 public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeMeshPool meshPool = new BlazeMeshPool();
 	private final BlazeUniforms uniforms = new BlazeUniforms();
 	private final BlazeLight light = new BlazeLight();
 	private final BlazeEnvironments environments = new BlazeEnvironments();
+	private final BlazeCull cull = new BlazeCull();
+	private final BlazeIdentity identity = new BlazeIdentity();
 
 	/** One pipeline per instance type, since the shader is generated from its layout. */
 	private final Map<PipelineKey, @Nullable GeneratedPipeline> pipelines = new HashMap<>();
@@ -132,7 +136,9 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			return;
 		}
 
-		submit(drawable);
+		// Before the render pass, not inside it. A compute dispatch is illegal inside a render pass on
+		// Vulkan, and on OpenGL it would bind a program out from under the draws already recorded.
+		submit(drawable, cull.dispatch(drawable, context, renderOrigin));
 	}
 
 	@Override
@@ -157,6 +163,8 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 
 		pipelines.clear();
 
+		identity.close();
+		cull.close();
 		environments.close();
 		light.close();
 		meshPool.close();
@@ -164,7 +172,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		GeneratedShaders.clear();
 	}
 
-	private void submit(List<BlazeInstancer<?>> drawable) {
+	private void submit(List<BlazeInstancer<?>> drawable, Set<BlazeInstancer<?>> culled) {
 		var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
 		GpuTextureView color = target.getColorTextureView();
 		GpuTextureView depth = target.getDepthTextureView();
@@ -179,6 +187,8 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		GpuBuffer vertices = meshPool.vertices();
 		GpuBuffer indices = meshPool.indices();
 
+		BlazeStats.reset();
+
 		// No clear on either attachment: this draws into the level as it stands, after the terrain
 		// and before whatever comes next. Clearing would erase the world.
 		try (RenderPass pass = encoder.createRenderPass(() -> "flywheel", color, Optional.empty(),
@@ -188,12 +198,12 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			pass.setIndexBuffer(indices, IndexType.INT);
 
 			for (BlazeInstancer<?> instancer : drawable) {
-				draw(pass, instancer);
+				draw(pass, instancer, culled.contains(instancer));
 			}
 		}
 	}
 
-	private void draw(RenderPass pass, BlazeInstancer<?> instancer) {
+	private void draw(RenderPass pass, BlazeInstancer<?> instancer, boolean culled) {
 		// Every declared binding must be supplied, and these are never absent: an empty volume is a
 		// buffer of zeros rather than nothing. Skipping the draw when there was no light yet is what
 		// made every machine in the world vanish -- a world with no light-using visual in it still
@@ -206,18 +216,40 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			return;
 		}
 
+		// The list the vertex shader turns gl_InstanceID into a real instance with. When the cull pass
+		// ran it is what the cull pass packed; when it did not, it is 0, 1, 2, ... so the same shader
+		// draws everything. The alternative -- two generated shaders, one indexed and one not -- would
+		// double the compile cost to save a buffer nobody notices.
+		var visible = culled ? instancer.visibleSlice()
+				: identity.upTo(instancer.instanceCount());
+		if (visible == null) {
+			return;
+		}
+
 		var samplers = RenderSystem.getSamplerCache();
 		GpuTextureView lightmap = Minecraft.getInstance().gameRenderer.lightmap();
 		var environment = environments.slice(environmentStorage, instancer.environment.matrixIndex());
 
-		for (BlazeDraw draw : instancer.draws()) {
+		List<BlazeDraw> draws = instancer.draws();
+
+		if (culled) {
+			BlazeStats.indirectInstancers++;
+		} else {
+			BlazeStats.directInstancers++;
+		}
+
+		for (int first = 0; first < draws.size(); ) {
+			BlazeDraw draw = draws.get(first);
+
 			if (draw.isEmpty()) {
+				first++;
 				continue;
 			}
 
 			GpuTextureView diffuse = textureOf(draw.material()
 					.texture());
 			if (diffuse == null) {
+				first++;
 				continue;
 			}
 
@@ -229,13 +261,23 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			GeneratedPipeline pipeline = pipelineFor(instancer, material);
 
 			if (pipeline == null) {
+				first++;
 				continue;
+			}
+
+			// How many draws after this one share everything the pipeline and the bindings are keyed
+			// by. Their commands sit next to each other in the command buffer -- the apply pass wrote
+			// one per draw, in this order -- so a run of them is one indirect call instead of several.
+			int last = first + 1;
+			while (last < draws.size() && sharesState(draw, draws.get(last))) {
+				last++;
 			}
 
 			pass.setPipeline(pipeline.pipeline());
 			pass.setUniform(BlazeUniforms.BLOCK_NAME, uniforms.slice());
 			pass.setUniform(BlazeEnvironments.BLOCK_NAME, environment);
 			pass.setUniform("_flw_instances", instanceSlice);
+			pass.setUniform("_flw_visible", visible);
 			pass.setUniform("_flw_lightSections", lightSections);
 			pass.setUniform("_flw_lightLut", lightLut);
 
@@ -246,10 +288,46 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 							.blur() ? FilterMode.LINEAR : FilterMode.NEAREST));
 			pass.bindTexture("Sampler2", lightmap, samplers.getClampToEdge(FilterMode.LINEAR));
 
-			var mesh = draw.mesh();
-			pass.drawIndexed(mesh.indexCount(), instancer.instanceCount(), mesh.firstIndex(),
-					mesh.baseVertex(), 0);
+			if (culled) {
+				// The whole point: how many instances this draws is a number in a buffer that the
+				// CPU never reads. An empty run costs the command fetch and nothing else.
+				pass.drawIndexedIndirect(instancer.commandsSlice(first, last - first), last - first);
+				BlazeStats.indirectCalls++;
+			} else {
+				for (int i = first; i < last; i++) {
+					var mesh = draws.get(i)
+							.mesh();
+					pass.drawIndexed(mesh.indexCount(), instancer.instanceCount(), mesh.firstIndex(),
+							mesh.baseVertex(), 0);
+					BlazeStats.directCalls++;
+				}
+			}
+
+			first = last;
 		}
+	}
+
+	/**
+	 * Whether two draws can go in one indirect call.
+	 *
+	 * <p>Everything the pipeline is built from and everything bound before it: the pipeline state, the
+	 * texture, and the filter that texture is sampled with. Nothing else varies between two draws of
+	 * one instancer -- they share the type, the instance buffer and the environment by construction.
+	 */
+	private static boolean sharesState(BlazeDraw a, BlazeDraw b) {
+		if (b.isEmpty()) {
+			return false;
+		}
+
+		return BlazeMaterials.Key.of(a.material())
+				.equals(BlazeMaterials.Key.of(b.material()))
+				&& a.material()
+						.texture()
+						.equals(b.material()
+								.texture())
+				&& a.material()
+						.blur() == b.material()
+								.blur();
 	}
 
 	/**

@@ -49,6 +49,7 @@ public final class PipelineSelfTest {
 			.withUniform("_flw_instances", UniformType.TEXEL_BUFFER, GpuFormat.RGBA32_UINT)
 			// R32, not RGBA32: both hold flat arrays of uints, so one texel has to be one uint. With
 			// four components a lookup past the first would read from four times the right offset.
+			.withUniform("_flw_visible", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
 			.withUniform("_flw_lightSections", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
 			.withUniform("_flw_lightLut", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
 			.withSampler("Sampler0")
