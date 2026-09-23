@@ -37,16 +37,21 @@ import net.minecraft.resources.Identifier;
  * <p>The usual way to build one is a compute shader writing to successive mips as storage images.
  * Blaze3D 26.2 has no storage images and no compute-writable textures at all, so each level is a
  * full-screen draw instead: three vertices, a fragment shader that reads four texels of the level
- * above and keeps the farthest. Slower than a compute reduction and entirely adequate -- the whole
- * chain is a few thousand pixels after the first level.
+ * above and carries both ends of their range upward. Slower than a compute reduction and entirely
+ * adequate -- the whole chain is a few thousand pixels after the first level.
  *
  * <h2>Which end is near</h2>
  *
- * <p>Measured rather than assumed, and the measurement came back against the assumption. This
- * backend treats 26.2's depth as reversed everywhere else -- {@code DepthStencilState.DEFAULT} is
- * {@code GREATER_THAN_OR_EQUAL} and {@code BlazeMaterials} mirrors every comparison on that basis --
- * but the values sampled out of the level's depth texture run from 0 at the camera upward. Near is
- * the <em>smaller</em> number here, so the farthest depth in a region is its <em>maximum</em>.
+ * <p>Depth here is reversed, the same as everywhere else in this backend: 1 at the near plane
+ * falling toward 0 in the distance, which is why {@code DepthStencilState.DEFAULT} is
+ * {@code GREATER_THAN_OR_EQUAL} and {@code BlazeMaterials} mirrors every comparison. So the farthest
+ * depth in a region is its <em>minimum</em>, carried in {@code .r}.
+ *
+ * <p>The magnitudes argue otherwise and they are wrong. With the near plane a twentieth of a block
+ * out, depth works out as roughly {@code near / distance}, so an ordinary scene lives between about
+ * 0.002 and 0.03 -- small numbers throughout, which reads as "near is zero" and cost this file a
+ * revision saying exactly that. The tell is the sky: it samples as precisely 0.0, and the sky is as
+ * far away as anything gets.
  *
  * <p>Which is why each texel carries both ends of its range rather than one. Occlusion culling needs
  * only the far end, but a pyramid holding a single number cannot be checked against the convention
@@ -108,10 +113,10 @@ public class DepthPyramid implements AutoCloseable {
 				vec2 pa = a.rg, pb = b.rg, pc = c.rg, pd = d.rg;
 			#endif
 
-				// Both ends carried up the chain: .r the nearest depth under this texel and .g the
-				// farthest. Occlusion culling needs only one of them, but which one depends on which
-				// way round the depth buffer runs -- and carrying both means that can be read off
-				// the pyramid rather than assumed, which is the one mistake here that would hide the
+				// Both ends carried up the chain: .r the smallest depth under this texel and .g the
+				// largest. On this reversed buffer .r is the farthest surface, which is the one
+				// occlusion culling reads -- but carrying both means that can be read off the
+				// pyramid rather than assumed, which is the one mistake here that would hide the
 				// world instead of showing it.
 				fragColor = vec2(min(min(pa.r, pb.r), min(pc.r, pd.r)),
 						max(max(pa.g, pb.g), max(pc.g, pd.g)));

@@ -35,6 +35,15 @@ public final class CullShaders {
 
 			layout(std430, FLW_SET(0) binding = 1) buffer Counts {
 				uint _flw_visibleCount;
+
+				// Where instances drop out, which is the only way to tell a test that culls nothing
+				// from a test that is never reached. Every one of these is incremented at the point
+				// the instance stops, so they add up to the number tested.
+				uint _flw_tested;
+				uint _flw_outOfFrustum;
+				uint _flw_tooClose;
+				uint _flw_offScreen;
+				uint _flw_occludedCount;
 			};
 
 			layout(std430, FLW_SET(0) binding = 2) writeonly buffer Visible {
@@ -121,6 +130,7 @@ public final class CullShaders {
 					// Straddling the camera plane: the projection is meaningless there, and
 					// something that close is not hidden by anything.
 					if (clip.w <= 0.0001) {
+						atomicAdd(_flw_tooClose, 1u);
 						return false;
 					}
 
@@ -135,6 +145,7 @@ public final class CullShaders {
 				// Partly off screen counts as visible; the frustum test has already had its say and
 				// the pyramid says nothing about what lies outside it.
 				if (any(lessThan(uvLo, vec2(0.0))) || any(greaterThan(uvHi, vec2(1.0)))) {
+					atomicAdd(_flw_offScreen, 1u);
 					return false;
 				}
 
@@ -148,15 +159,24 @@ public final class CullShaders {
 				ivec2 a = clamp(ivec2(uvLo * vec2(size)), ivec2(0), size - 1);
 				ivec2 b = clamp(ivec2(uvHi * vec2(size)), ivec2(0), size - 1);
 
-				float furthestDrawn = max(
-						max(texelFetch(_flw_depthPyramid, a, lod).g,
-								texelFetch(_flw_depthPyramid, ivec2(b.x, a.y), lod).g),
-						max(texelFetch(_flw_depthPyramid, ivec2(a.x, b.y), lod).g,
-								texelFetch(_flw_depthPyramid, b, lod).g));
+				// The .r channel, which is the smallest depth under each texel -- and on a reversed
+				// buffer the smallest is the *farthest*. Taking the minimum of four of them gives
+				// the farthest surface drawn anywhere in the rectangle.
+				float furthestDrawn = min(
+						min(texelFetch(_flw_depthPyramid, a, lod).r,
+								texelFetch(_flw_depthPyramid, ivec2(b.x, a.y), lod).r),
+						min(texelFetch(_flw_depthPyramid, ivec2(a.x, b.y), lod).r,
+								texelFetch(_flw_depthPyramid, b, lod).r));
 
-				// Near is the smaller number in this depth buffer -- measured, not assumed -- so the
-				// sphere's nearest point is the smallest of its projected depths.
-				return lo.z > furthestDrawn;
+				// Reversed depth: larger is nearer, so the sphere's nearest point is the largest of
+				// its projected depths, and it is hidden when even that is behind everything drawn.
+				//
+				// The magnitudes here mislead. With the near plane a twentieth of a block away, z
+				// works out as near/distance, so a whole ordinary scene lives between about 0.002
+				// and 0.03 -- which reads as "small numbers, therefore near is zero" and is exactly
+				// backwards. The tell is the sky: it comes back as precisely 0.0, and the sky is the
+				// far plane.
+				return hi.z < furthestDrawn;
 			}
 
 			void main() {
@@ -171,11 +191,15 @@ public final class CullShaders {
 				float radius = _flw_boundingSphere.w;
 				flw_transformBoundingSphere(instance, center, radius);
 
+				atomicAdd(_flw_tested, 1u);
+
 				if (!_flw_inFrustum(center, radius)) {
+					atomicAdd(_flw_outOfFrustum, 1u);
 					return;
 				}
 
 				if (_flw_occluded(center, radius)) {
+					atomicAdd(_flw_occludedCount, 1u);
 					return;
 				}
 

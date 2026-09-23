@@ -82,8 +82,9 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 		// Zeroed every frame, because the cull pass only ever adds to it. A count left over from
 		// last frame would draw this frame's survivors and last frame's ghosts together, growing
 		// until the buffer ran out.
-		Staging.upload(cull.counts.slice(), java.nio.ByteBuffer.allocateDirect(Integer.BYTES)
-				.order(java.nio.ByteOrder.nativeOrder()));
+		Staging.upload(cull.counts.slice(),
+				java.nio.ByteBuffer.allocateDirect(BlazeCull.COUNTS_BYTES)
+						.order(java.nio.ByteOrder.nativeOrder()));
 
 		var camera = context.camera().pos;
 		Staging.upload(cull.cullParams.slice(), BlazeCull.paramsFor(planes, boundingSphere,

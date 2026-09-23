@@ -23,6 +23,7 @@ import dev.engine_room.flywheel.api.backend.RenderContext;
 import dev.engine_room.flywheel.backend.FlwBackend;
 import dev.engine_room.flywheel.backend.compute.BarrierScope;
 import dev.engine_room.flywheel.backend.compute.Compute;
+import dev.engine_room.flywheel.backend.compute.ComputeBackend;
 import dev.engine_room.flywheel.backend.compute.ComputePass;
 import dev.engine_room.flywheel.backend.compute.ComputePipeline;
 import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
@@ -65,10 +66,24 @@ public class BlazeCull implements AutoCloseable {
 
 	static final int COMMAND_BYTES = COMMAND_INTS * Integer.BYTES;
 
+	/**
+	 * The survivor count, plus five slots saying where the rest dropped out.
+	 *
+	 * <p>Those five are not decoration. A cull pass that removes nothing and a cull pass that is
+	 * never reached both leave every instance drawn, and no frame rate tells them apart.
+	 */
+	static final int COUNTS_SLOTS = 6;
+
+	static final int COUNTS_BYTES = COUNTS_SLOTS * Integer.BYTES;
+
 	private final Map<Object, ComputePipeline> cullers = new HashMap<>();
 	private final Map<Object, Boolean> failed = new HashMap<>();
 
 	private @Nullable ComputePipeline apply;
+
+	private @Nullable GpuBuffer countsReadback;
+
+	private @Nullable BlazeInstancer<?> countsSource;
 
 	private final Vector4f[] planes = new Vector4f[6];
 
@@ -158,7 +173,77 @@ public class BlazeCull implements AutoCloseable {
 			pass.barrier(BarrierScope.STORAGE | BarrierScope.INDIRECT | BarrierScope.TEXTURE_FETCH);
 		}
 
+		publishCounts(culled);
+
 		return culled;
+	}
+
+	/**
+	 * Remembers whose counters to read, without copying anything yet.
+	 *
+	 * <p>The biggest instancer, because the interesting question is what happened to the bulk of the
+	 * instances rather than to whichever one happened to be first.
+	 */
+	private void publishCounts(Set<BlazeInstancer<?>> culled) {
+		BlazeInstancer<?> biggest = null;
+		for (BlazeInstancer<?> instancer : culled) {
+			if (biggest == null || instancer.instanceCount() > biggest.instanceCount()) {
+				biggest = instancer;
+			}
+		}
+
+		countsSource = biggest;
+	}
+
+	/**
+	 * The counters as of the last frame that culled anything, or null if none has.
+	 *
+	 * <p>The copy happens here rather than during the frame, and that is the whole trick. Issued in
+	 * the frame and mapped later, the readback returns memory the copy never wrote -- deterministic
+	 * enough across runs to look like real numbers, which cost an hour before the values were
+	 * recognised as depths from somewhere else. Copy, wait and map in one breath and it arrives.
+	 */
+	public int @Nullable [] lastCounts() {
+		BlazeInstancer<?> source = countsSource;
+		if (source == null) {
+			return null;
+		}
+
+		if (countsReadback == null) {
+			countsReadback = RenderSystem.getDevice()
+					.createBuffer(() -> "flywheel cull counts readback",
+							GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, COUNTS_BYTES);
+		}
+
+		try {
+			RenderSystem.getDevice()
+					.createCommandEncoder()
+					.copyToBuffer(source.countsSlice()
+							.buffer()
+							.slice(0, COUNTS_BYTES), countsReadback.slice(0, COUNTS_BYTES));
+
+			// A mappable buffer on 26.2 is already persistently mapped, so reading one synchronises
+			// nothing by itself.
+			ComputeBackend gpu = Compute.backend();
+			gpu.flush();
+			if (!gpu.awaitGpu(1_000_000_000L)) {
+				return null;
+			}
+
+			try (com.mojang.blaze3d.buffers.GpuBufferSlice.MappedView view =
+					countsReadback.map(true, false)) {
+				java.nio.IntBuffer values = view.data()
+						.asIntBuffer();
+
+				int[] out = new int[COUNTS_SLOTS];
+				for (int i = 0; i < COUNTS_SLOTS; i++) {
+					out[i] = values.get(i);
+				}
+				return out;
+			}
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	private static com.mojang.blaze3d.textures.GpuSampler nearest() {
@@ -272,8 +357,8 @@ public class BlazeCull implements AutoCloseable {
 			}
 
 			if (counts == null) {
-				counts = device.createBuffer(() -> "flywheel visible count", PLAIN_USAGE,
-						Integer.BYTES);
+				counts = device.createBuffer(() -> "flywheel visible count",
+						PLAIN_USAGE | GpuBuffer.USAGE_COPY_SRC, COUNTS_BYTES);
 			}
 			if (cullParams == null) {
 				cullParams = device.createBuffer(() -> "flywheel cull params", PLAIN_USAGE,

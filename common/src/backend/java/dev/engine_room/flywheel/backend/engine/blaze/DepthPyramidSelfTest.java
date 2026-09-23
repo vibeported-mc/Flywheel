@@ -192,13 +192,18 @@ public final class DepthPyramidSelfTest {
 				return new Result(false, lines);
 			}
 
-			// Which end is near, read off the pyramid rather than assumed. Getting this backwards is
-			// the mistake that makes occlusion culling hide what the player can see.
-			lines.add(stats.max > 0.5f
-					? "the near end is the larger number, so this depth buffer is reversed and the "
-							+ "farthest depth in a region is its minimum"
-					: "the near end is the smaller number, so this depth buffer is conventional and "
-							+ "the farthest depth in a region is its maximum");
+			// Which end is far, read off the pyramid rather than guessed at from magnitudes.
+			//
+			// Magnitudes cannot answer it. With the near plane a twentieth of a block away, depth
+			// works out as near/distance, so an ordinary scene lives between about 0.002 and 0.03
+			// whichever way round the buffer runs -- small numbers throughout, which reads as
+			// "near is zero" and is wrong. An earlier version of this said exactly that.
+			//
+			// The sky settles it: nothing is drawn there, so it holds the clear value, and the
+			// clear value is the far plane. It comes back as 0, so 0 is far and larger is nearer.
+			lines.add("the smallest depth here is " + stats.min + " and the largest " + stats.max
+					+ "; the empty sky holds the clear value, so the end nearest zero is the far "
+					+ "plane and the farthest depth in a region is its minimum");
 
 			return new Result(true, lines);
 		} catch (Exception e) {

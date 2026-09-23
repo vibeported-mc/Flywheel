@@ -199,6 +199,11 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		}
 	}
 
+	/** Where the cull pass dropped instances last frame, for anything asking why. */
+	public int @Nullable [] cullCounts() {
+		return cull.lastCounts();
+	}
+
 	/** The pyramid as last built, for anything that wants to read it back. */
 	public DepthPyramid depthPyramid() {
 		return depthPyramid;
