@@ -17,6 +17,7 @@ import org.joml.Vector4f;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.GpuTextureView;
 
 import dev.engine_room.flywheel.api.backend.RenderContext;
 import dev.engine_room.flywheel.backend.FlwBackend;
@@ -51,8 +52,13 @@ public class BlazeCull implements AutoCloseable {
 	/** Matching {@code local_size_x} in the generated cull shader. */
 	private static final int GROUP_SIZE = 64;
 
-	/** 6 frustum planes, the bounding sphere, the camera, and a count padded to a vec4. */
-	private static final int PARAMS_BYTES = (6 + 1 + 1 + 1) * 4 * Float.BYTES;
+	/**
+	 * 6 frustum planes, the bounding sphere, the camera, the view-projection, the pyramid's shape,
+	 * and a count padded to a vec4.
+	 */
+	private static final int PARAMS_BYTES = (6 + 1 + 1) * 4 * Float.BYTES
+			+ 16 * Float.BYTES
+			+ 2 * 4 * Float.BYTES;
 
 	/** indexCount, instanceCount, firstIndex, vertexOffset, firstInstance. */
 	static final int COMMAND_INTS = 5;
@@ -79,7 +85,8 @@ public class BlazeCull implements AutoCloseable {
 	 * Vulkan and an out-of-band program bind on OpenGL, and neither wants opening per instancer.
 	 */
 	public Set<BlazeInstancer<?>> dispatch(List<BlazeInstancer<?>> instancers, RenderContext context,
-			Vec3i origin) {
+			Vec3i origin, DepthPyramid depthPyramid) {
+		GpuTextureView pyramid = depthPyramid.fullView();
 		Set<BlazeInstancer<?>> culled = Collections.newSetFromMap(new IdentityHashMap<>());
 
 		ComputePipeline applyPipeline = applyPipeline();
@@ -97,7 +104,7 @@ public class BlazeCull implements AutoCloseable {
 			if (cullerFor(instancer) == null) {
 				continue;
 			}
-			if (instancer.prepareCull(planes, context, origin)) {
+			if (instancer.prepareCull(planes, context, origin, depthPyramid)) {
 				ready.add(instancer);
 			}
 		}
@@ -120,6 +127,13 @@ public class BlazeCull implements AutoCloseable {
 				pass.bindStorageBuffer(1, instancer.countsSlice());
 				pass.bindStorageBuffer(2, instancer.visibleSlice());
 				pass.bindStorageBuffer(3, instancer.cullParamsSlice());
+
+				// The pyramid, when there is one. A frame before anything has been drawn has none,
+				// and the params say so, so the shader does not read this.
+				if (pyramid != null) {
+					pass.bindTexture(ComputePipeline.FIRST_IMAGE_BINDING, pyramid, nearest());
+				}
+
 				pass.dispatch(MoreMath.ceilingDiv(instancer.instanceCount(), GROUP_SIZE), 1, 1);
 
 				culled.add(instancer);
@@ -145,6 +159,11 @@ public class BlazeCull implements AutoCloseable {
 		}
 
 		return culled;
+	}
+
+	private static com.mojang.blaze3d.textures.GpuSampler nearest() {
+		return RenderSystem.getSamplerCache()
+				.getClampToEdge(com.mojang.blaze3d.textures.FilterMode.NEAREST);
 	}
 
 	@Override
@@ -291,7 +310,9 @@ public class BlazeCull implements AutoCloseable {
 	}
 
 	static ByteBuffer paramsFor(Vector4f[] planes, org.joml.Vector4fc boundingSphere,
-			float cameraX, float cameraY, float cameraZ, int instanceCount) {
+			float cameraX, float cameraY, float cameraZ, int instanceCount,
+			org.joml.Matrix4fc viewProjection, float pyramidWidth, float pyramidHeight,
+			float pyramidLevels) {
 		ByteBuffer data = ByteBuffer.allocateDirect(PARAMS_BYTES)
 				.order(ByteOrder.nativeOrder());
 
@@ -311,6 +332,19 @@ public class BlazeCull implements AutoCloseable {
 				.putFloat(cameraY)
 				.putFloat(cameraZ)
 				.putFloat(0.0f);
+
+		float[] matrix = new float[16];
+		viewProjection.get(matrix);
+		for (float element : matrix) {
+			data.putFloat(element);
+		}
+
+		// The w component doubles as the switch: a pyramid that was never built leaves it at zero
+		// and the shader skips the occlusion test entirely, rather than testing against nothing.
+		data.putFloat(pyramidWidth)
+				.putFloat(pyramidHeight)
+				.putFloat(pyramidLevels)
+				.putFloat(pyramidLevels > 0 ? 1.0f : 0.0f);
 
 		data.putInt(instanceCount);
 

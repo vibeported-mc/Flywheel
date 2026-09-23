@@ -45,8 +45,17 @@ public final class CullShaders {
 				vec4 _flw_frustum[6];
 				vec4 _flw_boundingSphere;
 				vec4 _flw_cameraPos;
+				mat4 _flw_viewProjection;
+				// xy: the size of the pyramid's first level, z: how many levels, w: whether to use
+				// it at all. Zero in w turns occlusion culling off without a second shader.
+				vec4 _flw_pyramid;
 				uint _flw_instanceCount;
 			};
+
+			// The depth of what was drawn last frame, as a mip chain. Sampled rather than read out
+			// of a buffer, which is not a stylistic choice: copyTextureToBuffer does not deliver on
+			// 26.2, so an image binding is the only way a compute shader can see this at all.
+			layout(FLW_SET(0) binding = 6) uniform sampler2D _flw_depthPyramid;
 			""";
 
 	/**
@@ -70,6 +79,86 @@ public final class CullShaders {
 				return true;
 			}
 
+			/**
+			 * Whether everything already drawn in front of this sphere hides it.
+			 *
+			 * The pyramid holds, per texel, the range of depths beneath it -- .g being the farthest
+			 * surface drawn there. If the nearest point of the sphere is further away than the
+			 * farthest thing already drawn across the whole rectangle it covers, nothing of it can
+			 * be seen.
+			 *
+			 * Deliberately conservative at every step: a sphere rather than the real shape, its
+			 * whole screen rectangle rather than its silhouette, and a level coarse enough that the
+			 * rectangle spans about a texel. Every one of those errs toward "visible", and a wrong
+			 * "visible" costs only the work of drawing something hidden -- where a wrong "hidden"
+			 * takes machinery off the screen in front of the player.
+			 */
+			bool _flw_occluded(vec3 center, float radius) {
+				if (_flw_pyramid.w < 0.5) {
+					return false;
+				}
+			#ifdef FLW_CULL_EVERYTHING
+				// Diagnostic: claims everything is hidden. If the machinery does not vanish, the
+				// pyramid never reached this shader and the test logic is not what is wrong.
+				return true;
+			#endif
+
+				// The same space the draw works in: positions are relative to the render origin and
+				// the view-projection expects them relative to the camera.
+				vec3 rel = center - _flw_cameraPos.xyz;
+
+				vec3 lo = vec3(1e30);
+				vec3 hi = vec3(-1e30);
+
+				for (int corner = 0; corner < 8; corner++) {
+					vec3 offset = vec3(
+							(corner & 1) == 0 ? -radius : radius,
+							(corner & 2) == 0 ? -radius : radius,
+							(corner & 4) == 0 ? -radius : radius);
+
+					vec4 clip = _flw_viewProjection * vec4(rel + offset, 1.0);
+
+					// Straddling the camera plane: the projection is meaningless there, and
+					// something that close is not hidden by anything.
+					if (clip.w <= 0.0001) {
+						return false;
+					}
+
+					vec3 ndc = clip.xyz / clip.w;
+					lo = min(lo, ndc);
+					hi = max(hi, ndc);
+				}
+
+				vec2 uvLo = lo.xy * 0.5 + 0.5;
+				vec2 uvHi = hi.xy * 0.5 + 0.5;
+
+				// Partly off screen counts as visible; the frustum test has already had its say and
+				// the pyramid says nothing about what lies outside it.
+				if (any(lessThan(uvLo, vec2(0.0))) || any(greaterThan(uvHi, vec2(1.0)))) {
+					return false;
+				}
+
+				// Coarse enough that the rectangle is about one texel across, so four reads cover it.
+				vec2 spanInTexels = (uvHi - uvLo) * _flw_pyramid.xy;
+				float level = clamp(ceil(log2(max(max(spanInTexels.x, spanInTexels.y), 1.0))),
+						0.0, _flw_pyramid.z - 1.0);
+
+				int lod = int(level);
+				ivec2 size = textureSize(_flw_depthPyramid, lod);
+				ivec2 a = clamp(ivec2(uvLo * vec2(size)), ivec2(0), size - 1);
+				ivec2 b = clamp(ivec2(uvHi * vec2(size)), ivec2(0), size - 1);
+
+				float furthestDrawn = max(
+						max(texelFetch(_flw_depthPyramid, a, lod).g,
+								texelFetch(_flw_depthPyramid, ivec2(b.x, a.y), lod).g),
+						max(texelFetch(_flw_depthPyramid, ivec2(a.x, b.y), lod).g,
+								texelFetch(_flw_depthPyramid, b, lod).g));
+
+				// Near is the smaller number in this depth buffer -- measured, not assumed -- so the
+				// sphere's nearest point is the smallest of its projected depths.
+				return lo.z > furthestDrawn;
+			}
+
 			void main() {
 				uint i = gl_GlobalInvocationID.x;
 				if (i >= _flw_instanceCount) {
@@ -83,6 +172,10 @@ public final class CullShaders {
 				flw_transformBoundingSphere(instance, center, radius);
 
 				if (!_flw_inFrustum(center, radius)) {
+					return;
+				}
+
+				if (_flw_occluded(center, radius)) {
 					return;
 				}
 
@@ -130,8 +223,19 @@ public final class CullShaders {
 	}
 
 	/** @param stride the instance stride the CPU writes at */
+	/**
+	 * Makes the occlusion test claim everything is hidden.
+	 *
+	 * <p>For telling "the pyramid never reached the shader" from "the test never returns true",
+	 * which look identical from outside: in both cases nothing is culled. With this on the machinery
+	 * disappears, which is how the plumbing was confirmed working before the test itself was
+	 * trusted.
+	 */
+	private static final boolean CULL_EVERYTHING = false;
+
 	public static String generate(InstanceType<?> type, int stride) throws IOException {
-		return "layout(local_size_x = 64) in;\n\n"
+		return (CULL_EVERYTHING ? "#define FLW_CULL_EVERYTHING\n" : "")
+				+ "layout(local_size_x = 64) in;\n\n"
 				+ BUFFERS + "\n"
 				+ InstanceGlsl.struct(type.layout()) + "\n"
 				+ InstanceGlsl.storageAccessor(stride) + "\n"

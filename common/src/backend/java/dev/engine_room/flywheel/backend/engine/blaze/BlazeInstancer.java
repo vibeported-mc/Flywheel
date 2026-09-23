@@ -67,8 +67,9 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 	 *
 	 * @return false when there is nothing to cull, in which case nothing is dispatched for it
 	 */
-	public boolean prepareCull(org.joml.Vector4f[] planes, dev.engine_room.flywheel.api.backend.RenderContext context,
-			net.minecraft.core.Vec3i origin) {
+	public boolean prepareCull(org.joml.Vector4f[] planes,
+			dev.engine_room.flywheel.api.backend.RenderContext context, net.minecraft.core.Vec3i origin,
+			DepthPyramid pyramid) {
 		int count = instanceCount();
 		int draws = drawCount();
 
@@ -87,7 +88,11 @@ public class BlazeInstancer<I extends Instance> extends BaseInstancer<I> {
 		var camera = context.camera().pos;
 		Staging.upload(cull.cullParams.slice(), BlazeCull.paramsFor(planes, boundingSphere,
 				(float) (camera.x - origin.getX()), (float) (camera.y - origin.getY()),
-				(float) (camera.z - origin.getZ()), count));
+				(float) (camera.z - origin.getZ()), count, context.viewProjection(),
+				pyramid.width(), pyramid.height(),
+				// Zero levels turns the occlusion test off, which is what the first frame of a
+				// session gets: there is no previous frame to have a pyramid of.
+				pyramid.fullView() == null ? 0 : pyramid.levels()));
 
 		java.nio.ByteBuffer params = java.nio.ByteBuffer.allocateDirect(draws * 4 * Integer.BYTES)
 				.order(java.nio.ByteOrder.nativeOrder());

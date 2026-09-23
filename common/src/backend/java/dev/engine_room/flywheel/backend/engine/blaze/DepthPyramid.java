@@ -125,6 +125,8 @@ public class DepthPyramid implements AutoCloseable {
 	private @Nullable GpuTexture texture;
 	private final GpuTextureView[] levelViews;
 
+	private @Nullable GpuTextureView fullView;
+
 	private int width;
 	private int height;
 	private int levels;
@@ -171,6 +173,17 @@ public class DepthPyramid implements AutoCloseable {
 
 	public int height() {
 		return height;
+	}
+
+	/**
+	 * A view of the whole chain, for a shader that picks its own level.
+	 *
+	 * <p>The per-level views cannot serve: each covers one mip, so {@code texelFetch} with a level
+	 * argument has nothing to fetch from. Occlusion culling chooses a level from how big the thing
+	 * it is testing looks on screen, so it needs all of them.
+	 */
+	public @Nullable GpuTextureView fullView() {
+		return fullView;
 	}
 
 	/** The view of one level, for a shader that wants to sample it. */
@@ -318,6 +331,11 @@ public class DepthPyramid implements AutoCloseable {
 			}
 		}
 
+		if (fullView != null) {
+			fullView.close();
+			fullView = null;
+		}
+
 		if (texture != null) {
 			texture.close();
 			texture = null;
@@ -357,6 +375,9 @@ public class DepthPyramid implements AutoCloseable {
 		texture = RenderSystem.getDevice()
 				.createTexture(() -> "flywheel depth pyramid", usage, GpuFormat.RG32_FLOAT, w, h, 1,
 						levels);
+
+		fullView = RenderSystem.getDevice()
+				.createTextureView(texture);
 
 		// One view per level, because a pass draws into exactly one mip and samples exactly one
 		// other. A view of the whole chain cannot say which.

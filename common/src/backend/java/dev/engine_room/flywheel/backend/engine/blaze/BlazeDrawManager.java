@@ -161,7 +161,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 
 		// Before the render pass, not inside it. A compute dispatch is illegal inside a render pass on
 		// Vulkan, and on OpenGL it would bind a program out from under the draws already recorded.
-		submit(drawable, cull.dispatch(drawable, context, renderOrigin));
+		submit(drawable, cull.dispatch(drawable, context, renderOrigin, depthPyramid));
 	}
 
 	/**
