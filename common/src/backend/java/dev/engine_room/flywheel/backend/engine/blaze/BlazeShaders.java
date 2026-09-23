@@ -44,8 +44,6 @@ public final class BlazeShaders {
 
 	private static final String BUFFERS = """
 			uniform usamplerBuffer _flw_instances;
-			uniform usamplerBuffer _flw_models;
-			uniform usamplerBuffer _flw_visible;
 			""";
 
 	private static final String VARYINGS = """
@@ -56,12 +54,10 @@ public final class BlazeShaders {
 
 	private static final String MAIN = """
 			void main() {
-				// Which instance this is takes two hops, because what gets drawn was decided on the
-				// GPU: gl_InstanceID counts survivors of the cull, _flw_visible turns that into the
-				// real instance, and only then does the instance buffer mean anything.
-				uint base = texelFetch(_flw_models, gl_DrawID).y;
-				uint index = texelFetch(_flw_visible, int(base) + gl_InstanceID).x;
-				FlwInstance instance = _flw_unpackInstance(index);
+				// Straight by instance id, for now. Once the cull pass is wired this becomes two
+				// hops -- gl_InstanceID counts survivors, a compacted list turns that into the real
+				// instance -- which is the arrangement CullSelfTest already draws correctly.
+				FlwInstance instance = _flw_unpackInstance(uint(gl_InstanceID));
 
 				flw_vertexPos = vec4(flw_position, 1.0);
 				flw_vertexColor = flw_color;
@@ -74,7 +70,12 @@ public final class BlazeShaders {
 
 				flw_instanceVertex(instance);
 
-				gl_Position = flw_viewProjection * flw_vertexPos;
+				// Two different origins meet here, and getting it wrong does not fail, it throws the
+				// geometry across the sky. Instance positions are relative to Flywheel's render
+				// origin -- a block position that follows the player -- while Minecraft's
+				// view-projection expects positions relative to the camera. flw_cameraPos is the
+				// camera in render-origin space, so subtracting it converts between the two.
+				gl_Position = flw_viewProjection * vec4(flw_vertexPos.xyz - flw_cameraPos, 1.0);
 
 				v_color = flw_vertexColor;
 				v_texCoord = flw_vertexTexCoord;

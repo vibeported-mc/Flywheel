@@ -34,6 +34,12 @@ public class BlazeEngine extends EngineImpl {
 	@Override
 	public void render(RenderContext context) {
 		try {
+			// A draw manager is not handed the context, and this one needs it: the camera and the
+			// render origin are what its uniform block is built from.
+			if (drawManager() instanceof BlazeDrawManager blaze) {
+				blaze.prepare(context, renderOrigin());
+			}
+
 			environmentStorage().flush();
 			drawManager().render(lightStorage(), environmentStorage());
 		} catch (Exception e) {

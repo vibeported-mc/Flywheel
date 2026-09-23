@@ -24,13 +24,27 @@ import dev.engine_room.flywheel.backend.InternalVertex;
  */
 public final class BlazeVertex {
 	public static final VertexFormat FORMAT = VertexFormat.builder(0)
-			.addAttribute("flw_position", 0, InternalVertex.STRIDE, GpuFormat.RGB32_FLOAT, 1)
-			.addAttribute("flw_color", 12, InternalVertex.STRIDE, GpuFormat.RGBA8_UNORM, 1)
-			.addAttribute("flw_texCoord", 16, InternalVertex.STRIDE, GpuFormat.RG32_FLOAT, 1)
-			.addAttribute("flw_overlay", 24, InternalVertex.STRIDE, GpuFormat.RG16_SINT, 1)
-			.addAttribute("flw_light", 28, InternalVertex.STRIDE, GpuFormat.RG16_UINT, 1)
-			.addAttribute("flw_normal", 32, InternalVertex.STRIDE, GpuFormat.RGB8_SNORM, 1)
+			.addAttribute("flw_position", GpuFormat.RGB32_FLOAT)
+			.addAttribute("flw_color", GpuFormat.RGBA8_UNORM)
+			.addAttribute("flw_texCoord", GpuFormat.RG32_FLOAT)
+			.addAttribute("flw_overlay", GpuFormat.RG16_SINT)
+			.addAttribute("flw_light", GpuFormat.RG16_UINT)
+			// Advanced by 4 rather than its own 3 bytes, because InternalVertex pads the normal out
+			// to a 36-byte stride -- and a vertex size that is not a multiple of 4 is rejected.
+			.addAttribute("flw_normal", 4, GpuFormat.RGB8_SNORM)
 			.build();
+
+	static {
+		// The builder derives offsets by appending, so this is the one thing that could silently
+		// disagree with the bytes being written. Checking it here turns a wrong stride into a
+		// startup failure instead of geometry that reads every vertex from the wrong place -- which
+		// is what the first version of this did, having used an overload whose `stride` argument
+		// means the gap between a matrix's columns rather than between vertices.
+		if (FORMAT.getVertexSize() != InternalVertex.STRIDE) {
+			throw new IllegalStateException("vertex format is " + FORMAT.getVertexSize()
+					+ " bytes but InternalVertex writes " + InternalVertex.STRIDE);
+		}
+	}
 
 	private BlazeVertex() {
 	}

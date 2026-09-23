@@ -185,7 +185,17 @@ public abstract class DrawManager<N extends AbstractInstancer<?>> {
 
 	public abstract void triggerFallback();
 
-	public abstract MeshPool meshPool();
+	/**
+	 * The pool this manager keeps its geometry in, for the debug overlay, or null when it does not
+	 * keep one of this kind.
+	 *
+	 * <p>Not every backend can answer. The Blaze3D one pools its meshes in {@code GpuBuffer}s
+	 * rather than in this class, because a GL buffer name is not a thing Vulkan has -- so it
+	 * reports nothing here rather than the abstraction being widened for one debug screen.
+	 */
+	public @Nullable MeshPool meshPool() {
+		return null;
+	}
 
 	public Map<InstancerKey<?>, N> instancers() {
 		return instancers;

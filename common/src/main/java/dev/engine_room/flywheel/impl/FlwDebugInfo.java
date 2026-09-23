@@ -143,8 +143,17 @@ public final class FlwDebugInfo {
 	}
 
 	private static void addMeshDebugInfo(StringBuilder out, DrawManager<? extends AbstractInstancer<?>> drawManager) {
-		var meshPool = drawManager.meshPool()
-				.pooledMeshes();
+		var pool = drawManager.meshPool();
+
+		if (pool == null) {
+			// A backend that does not keep its geometry in this kind of pool. Saying so beats
+			// printing a zero that reads as "no meshes".
+			appendHeader2(out, "Meshes");
+			appendLine(out, "Not reported by this backend");
+			return;
+		}
+
+		var meshPool = pool.pooledMeshes();
 
 		appendHeader2(out, "Meshes");
 

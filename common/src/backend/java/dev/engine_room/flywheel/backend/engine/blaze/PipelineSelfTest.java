@@ -46,9 +46,6 @@ public final class PipelineSelfTest {
 	public static final BindGroupLayout LAYOUT = BindGroupLayout.builder()
 			.withUniform(BlazeUniforms.BLOCK_NAME, UniformType.UNIFORM_BUFFER)
 			.withUniform("_flw_instances", UniformType.TEXEL_BUFFER, GpuFormat.RGBA32_UINT)
-			.withUniform("_flw_models", UniformType.TEXEL_BUFFER, GpuFormat.RGBA32_UINT)
-			// R32, not RGBA32: the cull pass writes a flat array of uints, so one texel is one uint.
-			.withUniform("_flw_visible", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
 			.withSampler("Sampler0")
 			.withSampler("Sampler2")
 			.build();
