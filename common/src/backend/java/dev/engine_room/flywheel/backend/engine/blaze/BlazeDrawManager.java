@@ -55,12 +55,14 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeMeshPool meshPool = new BlazeMeshPool();
 	private final BlazeUniforms uniforms = new BlazeUniforms();
 	private final BlazeLight light = new BlazeLight();
+	private final BlazeEnvironments environments = new BlazeEnvironments();
 
 	/** One pipeline per instance type, since the shader is generated from its layout. */
 	private final Map<Object, @Nullable GeneratedPipeline> pipelines = new HashMap<>();
 
 	private @Nullable RenderContext context;
 	private Vec3i renderOrigin = Vec3i.ZERO;
+	private @Nullable EnvironmentStorage environmentStorage;
 	private boolean fallback;
 
 	/** Set by the engine before {@link #render}, since a draw manager is not given the context. */
@@ -113,6 +115,8 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 
 		uniforms.update(context, renderOrigin);
 		light.flush(lightStorage);
+		environments.flush(environmentStorage);
+		this.environmentStorage = environmentStorage;
 
 		List<BlazeInstancer<?>> drawable = new ArrayList<>();
 		for (BlazeInstancer<?> instancer : instancers.values()) {
@@ -153,6 +157,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 
 		pipelines.clear();
 
+		environments.close();
 		light.close();
 		meshPool.close();
 		uniforms.close();
@@ -214,6 +219,8 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 
 		pass.setPipeline(pipeline.pipeline());
 		pass.setUniform(BlazeUniforms.BLOCK_NAME, uniforms.slice());
+		pass.setUniform(BlazeEnvironments.BLOCK_NAME,
+				environments.slice(environmentStorage, instancer.environment.matrixIndex()));
 		pass.setUniform("_flw_instances", instanceSlice);
 		pass.setUniform("_flw_lightSections", lightSections);
 		pass.setUniform("_flw_lightLut", lightLut);

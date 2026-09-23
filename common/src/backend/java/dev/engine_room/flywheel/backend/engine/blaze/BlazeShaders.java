@@ -109,6 +109,15 @@ public final class BlazeShaders {
 
 				flw_instanceVertex(instance);
 
+				// The environment's transform, after the body and before the projection, which is
+				// where Flywheel's own shaders apply it. Everything mounted on a Create contraption
+				// is positioned in the contraption's space rather than the world's, so without this
+				// the parts draw where the contraption was assembled while the contraption itself
+				// flies away empty. For anything unembedded this is an identity.
+				flw_vertexPos = _flw_pose * flw_vertexPos;
+				flw_vertexNormal = mat3(_flw_normalA.xyz, _flw_normalB.xyz, _flw_normalC.xyz)
+						* flw_vertexNormal;
+
 				// Two different origins meet here, and getting it wrong does not fail, it throws the
 				// geometry across the sky. Instance positions are relative to Flywheel's render
 				// origin -- a block position that follows the player -- while Minecraft's
@@ -181,6 +190,7 @@ public final class BlazeShaders {
 		String vertex = "#version 460 core\n\n"
 				+ ATTRIBUTES + "\n"
 				+ BlazeUniforms.GLSL + "\n"
+				+ BlazeEnvironments.GLSL + "\n"
 				+ BUFFERS + "\n"
 				+ InstanceGlsl.struct(type.layout()) + "\n"
 				+ InstanceGlsl.texelAccessor(stride) + "\n"
