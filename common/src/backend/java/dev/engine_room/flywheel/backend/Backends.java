@@ -46,10 +46,29 @@ public final class Backends {
 	/**
 	 * Draw through Blaze3D rather than raw OpenGL, so the same code runs on Vulkan.
 	 *
-	 * <p>Priority 750 needs no special-casing to do the right thing. On OpenGL the proven indirect
-	 * backend is 1000 and still wins; on Vulkan it reports unsupported, because there is no GL
-	 * context for GlCompat to ask about, and this takes over. Raise it past 1000 once this one is
-	 * the better of the two on the same scene.
+	 * <p>Priority decides nothing on Vulkan. {@link GlCompat} cannot read capabilities without a GL
+	 * context, so both older backends report unsupported there and the choice is this or
+	 * {@code off}. What the number settles is OpenGL alone.
+	 *
+	 * <p>And on Intel it is already settled: {@link #INDIRECT} drops itself to 1 there, so 750 beats
+	 * it and {@link #INSTANCING}'s 500 as well. This is the default on Intel OpenGL today. Only
+	 * non-Intel OpenGL still takes the older backend.
+	 *
+	 * <p>750 is deliberately below {@code indirect}'s 1000 despite being the faster of the two where
+	 * both run: on one scene in one client, backend swapped underneath with nothing rebuilt between,
+	 * 10,000 gear trains read 1345 frames a second here against 854 and 907 either side of it. The
+	 * older backend's two readings bracket the rival rather than closing on it, so the gap is the
+	 * backend and not warm-up -- the confound this scene invites.
+	 *
+	 * <p>Part of that margin is occlusion culling, which the older backend does not do at all, so it
+	 * is not evidence that indirect drawing through Blaze3D is half again as fast. It is evidence
+	 * that the whole path is, on this scene.
+	 *
+	 * <p>Left at 750 pending a decision, not because promoting it broke anything. Raising it to
+	 * 1250 was tried and the suite failed {@code TrainCircuitTest} both times -- but so did the
+	 * control run at 750, which is what that reading was missing. The test is flaky under six
+	 * clients sharing one GPU and passes alone at either priority; the one run where it passed was
+	 * the outlier, and two runs against one is not a signal.
 	 */
 	public static final Backend INDIRECT_BLAZE3D = SimpleBackend.builder()
 			.engineFactory(level -> new BlazeEngine(level, new BlazeDrawManager(), 256))
