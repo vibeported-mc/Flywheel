@@ -56,7 +56,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeUniforms uniforms = new BlazeUniforms();
 
 	/** One pipeline per instance type, since the shader is generated from its layout. */
-	private final Map<Object, GeneratedPipeline> pipelines = new HashMap<>();
+	private final Map<Object, @Nullable GeneratedPipeline> pipelines = new HashMap<>();
 
 	private @Nullable RenderContext context;
 	private Vec3i renderOrigin = Vec3i.ZERO;
@@ -149,9 +149,6 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			instancer.delete();
 		}
 
-		for (GeneratedPipeline pipeline : pipelines.values()) {
-			pipeline.close();
-		}
 		pipelines.clear();
 
 		meshPool.close();
@@ -189,15 +186,13 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	}
 
 	private void draw(RenderPass pass, BlazeInstancer<?> instancer) {
-		GeneratedPipeline pipeline = pipelines.computeIfAbsent(instancer.type, key -> {
-			try {
-				return GeneratedPipeline.of(instancer);
-			} catch (Exception e) {
-				FlwBackend.LOGGER.error("Could not build a pipeline for {}", key, e);
-				return null;
-			}
-		});
+		// computeIfAbsent will not store a null, so a type whose shader did not compile would be
+		// retried -- and re-logged -- every frame. Remembered as an explicit absence instead.
+		if (!pipelines.containsKey(instancer.type)) {
+			pipelines.put(instancer.type, GeneratedPipeline.of(instancer));
+		}
 
+		GeneratedPipeline pipeline = pipelines.get(instancer.type);
 		if (pipeline == null) {
 			return;
 		}

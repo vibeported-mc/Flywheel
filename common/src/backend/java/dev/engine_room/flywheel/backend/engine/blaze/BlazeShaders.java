@@ -50,6 +50,26 @@ public final class BlazeShaders {
 			out vec4 v_color;
 			out vec2 v_texCoord;
 			out vec2 v_light;
+			out float v_shade;
+			""";
+
+	/**
+	 * Vanilla's cardinal face shading: top full, bottom half, north/south 0.8, east/west 0.6.
+	 *
+	 * <p>The blocky form rather than a smooth dot product, because Create's models are blocky and
+	 * this is the shading their textures were drawn to sit under. A smooth one makes every cog look
+	 * subtly plastic.
+	 */
+	private static final String DIFFUSE = """
+			float flw_diffuse(vec3 normal) {
+				if (normal.y > 0.5) {
+					return 1.0;
+				}
+				if (normal.y < -0.5) {
+					return 0.5;
+				}
+				return abs(normal.z) > abs(normal.x) ? 0.8 : 0.6;
+			}
 			""";
 
 	private static final String MAIN = """
@@ -80,6 +100,12 @@ public final class BlazeShaders {
 				v_color = flw_vertexColor;
 				v_texCoord = flw_vertexTexCoord;
 				v_light = flw_vertexLight;
+
+				// Minecraft's per-face brightness, which is what stops a blocky model reading as a
+				// flat silhouette. Chunk geometry gets this baked into its vertex colour by the
+				// mesher; an instanced model is transformed after that happens, so its shading has
+				// to be computed here from the normal the mod's body left behind.
+				v_shade = flw_diffuse(normalize(flw_vertexNormal));
 			}
 			""";
 
@@ -89,6 +115,7 @@ public final class BlazeShaders {
 			in vec4 v_color;
 			in vec2 v_texCoord;
 			in vec2 v_light;
+			in float v_shade;
 
 			uniform sampler2D Sampler0;
 			uniform sampler2D Sampler2;
@@ -102,7 +129,9 @@ public final class BlazeShaders {
 					discard;
 				}
 
-				fragColor = texel * texture(Sampler2, clamp(v_light, 0.5 / 16.0, 15.5 / 16.0));
+				vec4 lit = texel * texture(Sampler2, clamp(v_light, 0.5 / 16.0, 15.5 / 16.0));
+
+				fragColor = vec4(lit.rgb * v_shade, lit.a);
 			}
 			""";
 
@@ -127,6 +156,7 @@ public final class BlazeShaders {
 				+ InstanceGlsl.texelAccessor(stride) + "\n"
 				+ InstanceGlsl.unpack(type.layout()) + "\n"
 				+ GLOBALS + "\n"
+				+ DIFFUSE + "\n"
 				+ VARYINGS + "\n"
 				+ body + "\n"
 				+ MAIN;
