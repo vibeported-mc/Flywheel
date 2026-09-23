@@ -11,6 +11,7 @@ import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.systems.RenderSystem;
 
 import dev.engine_room.flywheel.api.backend.RenderContext;
+import net.minecraft.client.renderer.fog.FogData;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.phys.Vec3;
 
@@ -32,8 +33,11 @@ import net.minecraft.world.phys.Vec3;
  * sees an absolute position.
  */
 public class BlazeUniforms implements AutoCloseable {
-	/** mat4 viewProjection, vec4 cameraPos, two floats padded to 16, then ivec4 renderOrigin. */
-	public static final int SIZE = 64 + 16 + 16 + 16;
+	/**
+	 * mat4 viewProjection, vec4 cameraPos, two floats padded to 16, ivec4 renderOrigin, then the fog
+	 * colour and its two ranges.
+	 */
+	public static final int SIZE = 64 + 16 + 16 + 16 + 16 + 16;
 
 	public static final String BLOCK_NAME = "FlwFrame";
 
@@ -58,7 +62,16 @@ public class BlazeUniforms implements AutoCloseable {
 				float flw_renderSeconds;
 				float flw_renderTicks;
 				ivec4 _flw_renderOrigin;
+				vec4 flw_fogColor;
+				vec4 _flw_fogRanges;
 			};
+
+			// 26.2 runs two independent linear fogs -- an environmental one measured spherically and
+			// a render distance one measured cylindrically -- and takes whichever is stronger. Packed
+			// into one vec4 here for the same std140 reason as the two above, and named apart so the
+			// fog shaders a mod already ships compile against it unchanged.
+			#define flw_fogEnvironmentalRange _flw_fogRanges.xy
+			#define flw_fogRenderDistanceRange _flw_fogRanges.zw
 
 			// Flywheel's light lookup names it as an ivec3. Declared as an ivec4 above for the same
 			// reason the camera is -- std140 packs a three-component member and Std140Builder does
@@ -73,6 +86,7 @@ public class BlazeUniforms implements AutoCloseable {
 				.order(ByteOrder.nativeOrder());
 
 		Vec3 camera = context.camera().pos;
+		FogData fog = context.camera().fogData;
 
 		Std140Builder.intoBuffer(data)
 				.putMat4f(context.viewProjection())
@@ -90,7 +104,15 @@ public class BlazeUniforms implements AutoCloseable {
 				.putFloat(renderSeconds(context) * 20.0f)
 					// Where the light volume is anchored. Instance positions are relative to it and
 					// the lookup adds it back to reach an absolute block position.
-					.putIVec4(renderOrigin.getX(), renderOrigin.getY(), renderOrigin.getZ(), 0);
+					.putIVec4(renderOrigin.getX(), renderOrigin.getY(), renderOrigin.getZ(), 0)
+					.putVec4(fog.color.x(), fog.color.y(), fog.color.z(), fog.color.w())
+					.putVec4(fog.environmentalStart, fog.environmentalEnd, fog.renderDistanceStart,
+							fog.renderDistanceEnd);
+
+		BlazeStats.fogEnvironmentalStart = fog.environmentalStart;
+		BlazeStats.fogEnvironmentalEnd = fog.environmentalEnd;
+		BlazeStats.fogRenderDistanceStart = fog.renderDistanceStart;
+		BlazeStats.fogRenderDistanceEnd = fog.renderDistanceEnd;
 
 		data.rewind();
 

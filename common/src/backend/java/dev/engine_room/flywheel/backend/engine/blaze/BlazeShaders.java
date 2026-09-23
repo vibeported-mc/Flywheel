@@ -54,6 +54,11 @@ public final class BlazeShaders {
 			out vec2 v_texCoord;
 			out vec2 v_light;
 			out float v_shade;
+			// How far this vertex is from the camera, measured the two ways 26.2's two fogs measure
+			// it. Computed here rather than in the fragment shader because the position it is
+			// measured from is the one the projection was applied to, and recovering that from a
+			// depth value is both harder and wrong at the edges.
+			out vec2 v_fogDistance;
 			""";
 
 	/**
@@ -148,32 +153,64 @@ public final class BlazeShaders {
 				// mesher; an instanced model is transformed after that happens, so its shading has
 				// to be computed here from the normal the mod's body left behind.
 				v_shade = flw_diffuse(normalize(flw_vertexNormal));
+
+				// Spherical for the environmental fog and cylindrical for the render distance one,
+				// which is what makes the far edge of the loaded world a flat wall rather than a
+				// dome -- the two are not interchangeable and vanilla uses both.
+				vec3 _flw_relative = flw_vertexPos.xyz - flw_cameraPos.xyz;
+				v_fogDistance = vec2(length(_flw_relative),
+						max(length(_flw_relative.xz), abs(_flw_relative.y)));
 			}
 			""";
 
-	private static final String FRAGMENT = """
-			#version 460 core
-
+	/**
+	 * Everything in the fragment shader that is the same whatever the material is.
+	 *
+	 * <p>The two names it leaves undefined -- {@code flw_discardPredicate} and
+	 * {@code flw_fogFilter} -- are the mod-supplied half, exactly as the vertex shader's
+	 * {@code flw_instanceVertex} is, and they come from the material rather than the instance type.
+	 */
+	private static final String FRAGMENT_PREAMBLE = """
 			in vec4 v_color;
 			in vec2 v_texCoord;
 			in vec2 v_light;
 			in float v_shade;
+			in vec2 v_fogDistance;
 
 			uniform sampler2D Sampler0;
 			uniform sampler2D Sampler2;
 
 			out vec4 fragColor;
 
-			void main() {
-				vec4 texel = texture(Sampler0, v_texCoord) * v_color;
+			// The names the fog shaders are written against. Globals rather than parameters because
+			// that is the shape `flw_fogFilter` was given long before this backend existed.
+			float flw_distance;
+			float flw_cylindricalDistance;
+			""";
 
-				if (texel.a < 0.01) {
+	/**
+	 * The order the steps come in, which is not interchangeable.
+	 *
+	 * <p>Taken from Flywheel's own {@code common.frag}: the cutout test runs on the plain sampled
+	 * colour, before shading and before the lightmap, and the fog filter runs last on everything.
+	 * Testing after the lightmap instead would discard a cutout edge in a dark room and keep it in
+	 * a lit one, and fogging before the lightmap would light the fog.
+	 */
+	private static final String FRAGMENT_MAIN = """
+			void main() {
+				flw_distance = v_fogDistance.x;
+				flw_cylindricalDistance = v_fogDistance.y;
+
+				vec4 color = texture(Sampler0, v_texCoord) * v_color;
+
+				if (flw_discardPredicate(color)) {
 					discard;
 				}
 
-				vec4 lit = texel * texture(Sampler2, clamp(v_light, 0.5 / 16.0, 15.5 / 16.0));
+				color.rgb *= v_shade;
+				color *= texture(Sampler2, clamp(v_light, 0.5 / 16.0, 15.5 / 16.0));
 
-				fragColor = vec4(lit.rgb * v_shade, lit.a);
+				fragColor = flw_fogFilter(color);
 			}
 			""";
 
@@ -187,7 +224,8 @@ public final class BlazeShaders {
 	 * @return the identifier a pipeline should name
 	 * @throws IOException when the mod's shader body, or anything it includes, cannot be read
 	 */
-	public static Identifier generate(InstanceType<?> type, int stride) throws IOException {
+	public static Identifier generate(InstanceType<?> type, int stride, Identifier fog,
+			Identifier cutout) throws IOException {
 		String body = ShaderIncludes.read(type.vertexShader());
 
 		String vertex = "#version 460 core\n\n"
@@ -211,15 +249,26 @@ public final class BlazeShaders {
 				+ body + "\n"
 				+ MAIN;
 
-		// Named after the shader it was built from, so two instance types cannot collide and the
-		// same type does not regenerate under a new name every frame.
-		String name = type.vertexShader()
-				.getNamespace() + "_"
-				+ type.vertexShader()
-						.getPath()
-						.replace('/', '_')
-						.replace('.', '_');
+		String fragment = "#version 460 core\n\n"
+				+ BlazeUniforms.GLSL + "\n"
+				+ FRAGMENT_PREAMBLE + "\n"
+				+ ShaderIncludes.read(cutout) + "\n"
+				+ ShaderIncludes.read(fog) + "\n"
+				+ FRAGMENT_MAIN;
 
-		return GeneratedShaders.pipeline(name, vertex, FRAGMENT);
+		// Named after everything it was built from, so two instance types cannot collide and the
+		// same type does not regenerate under a new name every frame. The fog and cutout shaders are
+		// in the name because they are compiled into the fragment shader: leaving them out gave every
+		// material of one instance type the first material's fog, which in the overworld is no
+		// difference at all and in the nether is every machine standing out of a red wall.
+		String name = flatten(type.vertexShader()) + "__" + flatten(cutout) + "__" + flatten(fog);
+
+		return GeneratedShaders.pipeline(name, vertex, fragment);
+	}
+
+	private static String flatten(Identifier id) {
+		return id.getNamespace() + "_" + id.getPath()
+				.replace('/', '_')
+				.replace('.', '_');
 	}
 }

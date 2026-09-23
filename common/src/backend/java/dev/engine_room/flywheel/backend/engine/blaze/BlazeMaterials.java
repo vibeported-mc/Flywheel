@@ -11,6 +11,7 @@ import dev.engine_room.flywheel.api.material.DepthTest;
 import dev.engine_room.flywheel.api.material.Material;
 import dev.engine_room.flywheel.api.material.Transparency;
 import dev.engine_room.flywheel.api.material.WriteMask;
+import net.minecraft.resources.Identifier;
 
 /**
  * A material's fixed-function state, as a Blaze3D pipeline describes it.
@@ -32,16 +33,23 @@ public final class BlazeMaterials {
 	/**
 	 * Everything about a material that the pipeline has to be built around.
 	 *
-	 * <p>Deliberately not the whole material. The texture, the light shader and the fog shader do
-	 * not appear, because they are bindings and shader source rather than pipeline state -- folding
-	 * them in would build a separate pipeline per texture and there are hundreds.
+	 * <p>Deliberately not the whole material. The texture does not appear, because it is a binding
+	 * rather than pipeline state and folding it in would build a separate pipeline per texture, and
+	 * there are hundreds.
+	 *
+	 * <p>The fog and cutout shaders do appear, although they are source rather than state, because
+	 * on 26.2 a pipeline carries its compiled shaders: two materials that fog differently cannot
+	 * share one however identical their blending is.
 	 */
 	public record Key(Transparency transparency, DepthTest depthTest, WriteMask writeMask,
-			boolean backfaceCulling, boolean polygonOffset) {
+			boolean backfaceCulling, boolean polygonOffset, Identifier fog, Identifier cutout) {
 
 		public static Key of(Material material) {
 			return new Key(material.transparency(), material.depthTest(), material.writeMask(),
-					material.backfaceCulling(), material.polygonOffset());
+					material.backfaceCulling(), material.polygonOffset(), material.fog()
+							.source(),
+					material.cutout()
+							.source());
 		}
 
 		/** A short, stable name, so a generated shader can be keyed by it without collisions. */

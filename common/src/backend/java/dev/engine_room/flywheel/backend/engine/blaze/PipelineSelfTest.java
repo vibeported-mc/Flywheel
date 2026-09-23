@@ -14,6 +14,8 @@ import com.mojang.blaze3d.systems.RenderSystem;
 
 import dev.engine_room.flywheel.api.instance.InstanceType;
 import dev.engine_room.flywheel.lib.instance.InstanceTypes;
+import dev.engine_room.flywheel.lib.material.CutoutShaders;
+import dev.engine_room.flywheel.lib.material.FogShaders;
 import dev.engine_room.flywheel.lib.math.MoreMath;
 import net.minecraft.resources.Identifier;
 
@@ -78,7 +80,8 @@ public final class PipelineSelfTest {
 			try {
 				int stride = MoreMath.align16(type.layout()
 						.byteSize());
-				Identifier shaders = BlazeShaders.generate(type, stride);
+				Identifier shaders = BlazeShaders.generate(type, stride, CutoutShaders.ONE_TENTH.source(),
+						FogShaders.LINEAR.source());
 
 				RenderPipeline pipeline = pipelineFor(shaders);
 				CompiledRenderPipeline compiled = RenderSystem.getDevice()
@@ -105,7 +108,8 @@ public final class PipelineSelfTest {
 		return pipelineFor(shaders, new BlazeMaterials.Key(
 				dev.engine_room.flywheel.api.material.Transparency.OPAQUE,
 				dev.engine_room.flywheel.api.material.DepthTest.LEQUAL,
-				dev.engine_room.flywheel.api.material.WriteMask.COLOR_DEPTH, true, false));
+				dev.engine_room.flywheel.api.material.WriteMask.COLOR_DEPTH, true, false,
+				FogShaders.LINEAR.source(), CutoutShaders.ONE_TENTH.source()));
 	}
 
 	/** The same pipeline, with a material's fixed-function state baked into it. */

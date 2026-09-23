@@ -28,6 +28,23 @@ public final class BlazeStats {
 
 	public static volatile int directCalls;
 
+	/**
+	 * The fog ranges the last frame's uniforms were written with, in blocks.
+	 *
+	 * <p>Published because fog is invisible in the scenes worth testing in: at ten blocks in the
+	 * overworld the filter runs and changes nothing, so a correct screenshot and a fragment shader
+	 * that ignores fog entirely look exactly alike. These are the numbers the shader read, rather
+	 * than the numbers vanilla holds -- a backend that fills its uniform block wrongly would agree
+	 * with vanilla and still draw no fog.
+	 */
+	public static volatile float fogEnvironmentalStart;
+
+	public static volatile float fogEnvironmentalEnd;
+
+	public static volatile float fogRenderDistanceStart;
+
+	public static volatile float fogRenderDistanceEnd;
+
 	private BlazeStats() {
 	}
 
