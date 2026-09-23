@@ -75,7 +75,7 @@ public final class BlazeShaders {
 				// origin -- a block position that follows the player -- while Minecraft's
 				// view-projection expects positions relative to the camera. flw_cameraPos is the
 				// camera in render-origin space, so subtracting it converts between the two.
-				gl_Position = flw_viewProjection * vec4(flw_vertexPos.xyz - flw_cameraPos, 1.0);
+				gl_Position = flw_viewProjection * vec4(flw_vertexPos.xyz - flw_cameraPos.xyz, 1.0);
 
 				v_color = flw_vertexColor;
 				v_texCoord = flw_vertexTexCoord;

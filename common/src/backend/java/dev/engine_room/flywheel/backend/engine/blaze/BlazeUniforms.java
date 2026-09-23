@@ -32,16 +32,29 @@ import net.minecraft.world.phys.Vec3;
  * sees an absolute position.
  */
 public class BlazeUniforms implements AutoCloseable {
-	/** mat4 viewProjection, vec3 cameraPos + pad, float renderSeconds + pad to 16. */
+	/** mat4 viewProjection, vec4 cameraPos, float renderSeconds padded out to 16. */
 	public static final int SIZE = 64 + 16 + 16;
 
 	public static final String BLOCK_NAME = "FlwFrame";
 
-	/** Declared in every generated shader that needs it, and matched by name at link time. */
+	/**
+	 * Declared in every generated shader that needs it, and matched by name at link time.
+	 *
+	 * <p>The camera is a vec4 rather than a vec3, and that is not cosmetic.
+	 *
+	 * <p>GLSL's std140 gives a vec3 an alignment of 16 and a size of 12, so a float declared after
+	 * one is packed into the gap at offset 76. {@code Std140Builder.putVec3} does not pack it: it
+	 * writes three floats and then skips the fourth, leaving the next write at 80. Declare the
+	 * member as a vec3 and the clock is written at 80 and read at 76 -- and the shader reads zero
+	 * from the padding, so every machine in the world stands still while the matrix beside it,
+	 * written the same way, is perfectly correct.
+	 *
+	 * <p>Making it a vec4 puts both sides at 80 and the question does not arise.
+	 */
 	public static final String GLSL = """
 			layout(std140) uniform FlwFrame {
 				mat4 flw_viewProjection;
-				vec3 flw_cameraPos;
+				vec4 flw_cameraPos;
 				float flw_renderSeconds;
 			};
 			""";
@@ -56,9 +69,9 @@ public class BlazeUniforms implements AutoCloseable {
 
 		Std140Builder.intoBuffer(data)
 				.putMat4f(context.viewProjection())
-				.putVec3((float) (camera.x - renderOrigin.getX()),
+				.putVec4((float) (camera.x - renderOrigin.getX()),
 						(float) (camera.y - renderOrigin.getY()),
-						(float) (camera.z - renderOrigin.getZ()))
+						(float) (camera.z - renderOrigin.getZ()), 0.0f)
 				// Not the world time. A rotating shader multiplies this by an instance's speed to
 				// get an angle, so it has to advance smoothly between ticks or every cog in the
 				// world steps twenty times a second instead of turning.
