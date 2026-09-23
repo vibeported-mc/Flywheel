@@ -95,7 +95,7 @@ public final class FlywheelNeoForge {
 				VisualizationManager manager = VisualizationManager.get(context.level());
 				if (manager != null) {
 					manager.renderDispatcher()
-							.beforeCrumbling(context, context.levelRenderState().blockBreakingRenderStates);
+							.beforeCrumbling(context, context.blockBreaking());
 				}
 			}
 		});

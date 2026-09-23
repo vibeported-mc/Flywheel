@@ -2,8 +2,8 @@ package dev.engine_room.flywheel.backend.engine.blaze;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-
-import org.jspecify.annotations.Nullable;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
@@ -19,67 +19,55 @@ import com.mojang.blaze3d.systems.RenderSystem;
  * goes where selection already goes, through {@code _flw_visible}, and the shader is the same one
  * either way.
  *
- * <h2>Why the entries are so far apart</h2>
+ * <h2>One buffer each, rather than offsets into one</h2>
  *
- * <p>Each entry is one {@code uint} and the next begins 256 bytes later, because the binding is a
- * uniform texel buffer and a texel buffer's offset has to satisfy
- * {@code minTexelBufferOffsetAlignment}. The Vulkan specification allows an implementation to
- * require as much as 256, so 256 it is: packing them four bytes apart works on the card this was
- * written on and fails on somebody else's, which is the worst way for it to fail.
+ * <p>The first version of this packed every draw's index into a single buffer and bound a slice of
+ * it per draw, spaced 256 bytes apart to satisfy the worst texel buffer offset alignment Vulkan
+ * permits. Blaze3D does not allow it at all: binding a uniform texel buffer throws <em>"Uniform
+ * texel buffers do not support a slice of a buffer, must be entire buffer"</em>, and because the
+ * engine answers an exception during a frame by disabling itself, the cost of getting this wrong was
+ * every machine in the world disappearing rather than a missing overlay.
+ *
+ * <p>So each draw gets its own four-byte buffer, bound whole. They are pooled and reused, and there
+ * are only ever as many as there are blocks being broken at once.
  */
 public class BlazeCrumbling implements AutoCloseable {
-	/** The largest alignment a Vulkan implementation may require of a texel buffer offset. */
-	private static final int STRIDE = 256;
-
 	private static final int USAGE = GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER | GpuBuffer.USAGE_COPY_DST;
 
-	private @Nullable GpuBuffer buffer;
-	private int capacity;
+	private final List<GpuBuffer> buffers = new ArrayList<>();
 
 	/**
-	 * Writes one entry per instance about to be drawn, in one upload before the render pass opens.
+	 * Writes one buffer per instance about to be drawn, before the render pass opens.
 	 *
 	 * @param indices the instance index each crumbling draw selects, in draw order
 	 */
 	public void prepare(int[] indices, int count) {
-		if (count == 0) {
-			return;
+		while (buffers.size() < count) {
+			buffers.add(RenderSystem.getDevice()
+					.createBuffer(() -> "flywheel crumbling selection", USAGE, Integer.BYTES));
 		}
-
-		if (buffer == null || count > capacity) {
-			if (buffer != null) {
-				buffer.close();
-			}
-			buffer = RenderSystem.getDevice()
-					.createBuffer(() -> "flywheel crumbling selection", USAGE,
-							(long) count * STRIDE);
-			capacity = count;
-		}
-
-		ByteBuffer data = ByteBuffer.allocateDirect(count * STRIDE)
-				.order(ByteOrder.nativeOrder());
 
 		for (int i = 0; i < count; i++) {
-			data.putInt(i * STRIDE, indices[i]);
-		}
+			ByteBuffer data = ByteBuffer.allocateDirect(Integer.BYTES)
+					.order(ByteOrder.nativeOrder());
+			data.putInt(0, indices[i]);
 
-		Staging.upload(buffer.slice(), data);
+			Staging.upload(buffers.get(i)
+					.slice(), data);
+		}
 	}
 
 	/** The one-element list for the {@code i}th crumbling draw of this frame. */
 	public GpuBufferSlice slice(int i) {
-		if (buffer == null) {
-			throw new IllegalStateException("crumbling selection was not prepared");
-		}
-		return buffer.slice(i * STRIDE, Integer.BYTES);
+		return buffers.get(i)
+				.slice();
 	}
 
 	@Override
 	public void close() {
-		if (buffer != null) {
+		for (GpuBuffer buffer : buffers) {
 			buffer.close();
-			buffer = null;
-			capacity = 0;
 		}
+		buffers.clear();
 	}
 }
