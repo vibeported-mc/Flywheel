@@ -178,15 +178,16 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	 * an arbitrary moment and see a real scene rather than a cleared buffer.
 	 */
 	private void buildDepthPyramid() {
-		var depth = Minecraft.getInstance().gameRenderer.mainRenderTarget()
-				.getDepthTexture();
+		var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+		var depth = target.getDepthTexture();
+		var depthView = target.getDepthTextureView();
 
-		if (depth == null) {
+		if (depth == null || depthView == null) {
 			return;
 		}
 
 		try {
-			depthPyramid.build(depth);
+			depthPyramid.build(depth, depthView);
 			BlazeStats.depthPyramidLevels = depthPyramid.levels();
 
 			// Fine enough that solid ground reads as ground rather than as the sky behind it, which

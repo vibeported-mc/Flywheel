@@ -122,6 +122,10 @@ public class DepthPyramid implements AutoCloseable {
 	private int sampleLevel;
 	private int sampleTexels;
 
+	private @Nullable GpuBuffer storage;
+	private int storageLevel;
+	private int storageTexels;
+
 	public DepthPyramid() {
 		levelViews = new GpuTextureView[32];
 	}
@@ -145,8 +149,17 @@ public class DepthPyramid implements AutoCloseable {
 		return levels;
 	}
 
-	/** Reduces the given depth texture into the chain, one full-screen draw per level. */
-	public void build(GpuTexture depth) {
+	/**
+	 * Reduces the level's depth into the chain, one full-screen draw per level.
+	 *
+	 * @param depth the texture, for its size
+	 * @param depthView the view to sample it through -- the render target's own, not one made here.
+	 *            A depth texture can carry a stencil aspect as well, and a view that picks the wrong
+	 *            one reads as zero everywhere rather than failing, which is indistinguishable from a
+	 *            frame of empty sky. Minecraft already keeps a view it samples this texture through;
+	 *            using that one avoids having to guess.
+	 */
+	public void build(GpuTexture depth, GpuTextureView depthView) {
 		ensure(Math.max(1, depth.getWidth(0) / DOWNSCALE), Math.max(1, depth.getHeight(0) / DOWNSCALE));
 
 		RenderPipeline reduce = pipeline();
@@ -159,19 +172,15 @@ public class DepthPyramid implements AutoCloseable {
 		// The first level reads the real depth buffer; every later one reads the level above. The
 		// source is always a different texture or a different mip than the target, which is what
 		// keeps this legal -- a pass may not sample the mip it is drawing into.
-		try (GpuTextureView depthView = RenderSystem.getDevice()
-				.createTextureView(depth)) {
+		for (int level = 0; level < levels; level++) {
+			GpuTextureView source = level == 0 ? depthView : levelViews[level - 1];
 
-			for (int level = 0; level < levels; level++) {
-				GpuTextureView source = level == 0 ? depthView : levelViews[level - 1];
+			try (RenderPass pass = encoder.createRenderPass(() -> "flywheel depth pyramid",
+					levelViews[level], Optional.empty(), null, OptionalDouble.empty())) {
 
-				try (RenderPass pass = encoder.createRenderPass(() -> "flywheel depth pyramid",
-						levelViews[level], Optional.empty(), null, OptionalDouble.empty())) {
-
-					pass.setPipeline(reduce);
-					pass.bindTexture("Source", source, nearest);
-					pass.draw(0, 3, 0, 1);
-				}
+				pass.setPipeline(reduce);
+				pass.bindTexture("Source", source, nearest);
+				pass.draw(0, 3, 0, 1);
 			}
 		}
 	}
@@ -206,6 +215,47 @@ public class DepthPyramid implements AutoCloseable {
 				}, level);
 	}
 
+	/**
+	 * Copies one level into a buffer a compute shader can read.
+	 *
+	 * <p>Separate from {@link #sampleLevel} because the destination is a storage buffer rather than a
+	 * mappable one: this is the copy the cull pass needs, not the one a test reads. Both go through
+	 * {@code copyTextureToBuffer}, which is the call whose completion callback never fires here --
+	 * so whether this arrives at all is the question the self-test answers by scanning the result on
+	 * the GPU rather than on the CPU.
+	 */
+	public @Nullable GpuBuffer storageOf(int level) {
+		if (texture == null || level >= levels) {
+			return null;
+		}
+
+		int texels = texture.getWidth(level) * texture.getHeight(level);
+
+		if (storage == null || storageLevel != level || storageTexels != texels) {
+			if (storage != null) {
+				storage.close();
+			}
+			storage = RenderSystem.getDevice()
+					.createBuffer(() -> "flywheel depth pyramid storage",
+							dev.engine_room.flywheel.backend.compute.FlwBufferUsage.STORAGE
+									| GpuBuffer.USAGE_COPY_DST,
+							(long) texels * Float.BYTES);
+			storageLevel = level;
+			storageTexels = texels;
+		}
+
+		RenderSystem.getDevice()
+				.createCommandEncoder()
+				.copyTextureToBuffer(texture, storage, 0, () -> {
+				}, level);
+
+		return storage;
+	}
+
+	public int storageTexels() {
+		return storageTexels;
+	}
+
 	public @Nullable GpuBuffer sample() {
 		return sample;
 	}
@@ -236,6 +286,12 @@ public class DepthPyramid implements AutoCloseable {
 			sample.close();
 			sample = null;
 			sampleTexels = 0;
+		}
+
+		if (storage != null) {
+			storage.close();
+			storage = null;
+			storageTexels = 0;
 		}
 
 		levels = 0;
