@@ -21,7 +21,7 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import net.minecraft.resources.Identifier;
 
 /**
- * A mip chain of the frame's depth, each texel holding the farthest depth beneath it.
+ * A mip chain of the frame's depth, holding the range of depths beneath each texel.
  *
  * <p>What occlusion culling reads. A cull pass wanting to know whether an instance is hidden
  * projects its bounding sphere to a rectangle on screen and asks this one question: is everything
@@ -31,18 +31,28 @@ import net.minecraft.resources.Identifier;
  *
  * <h2>Why fragment passes</h2>
  *
+ * <p>Each texel holds two numbers: the nearest depth under it and the farthest. See below for why
+ * both, rather than the one occlusion culling actually consumes.
+ *
  * <p>The usual way to build one is a compute shader writing to successive mips as storage images.
  * Blaze3D 26.2 has no storage images and no compute-writable textures at all, so each level is a
  * full-screen draw instead: three vertices, a fragment shader that reads four texels of the level
  * above and keeps the farthest. Slower than a compute reduction and entirely adequate -- the whole
  * chain is a few thousand pixels after the first level.
  *
- * <h2>Reversed depth</h2>
+ * <h2>Which end is near</h2>
  *
- * <p>26.2 draws into a reversed depth buffer: near is 1, far is 0. So the farthest depth in a region
- * is its <em>minimum</em>, and the reduction takes {@code min}. Taking {@code max} builds a pyramid
- * of near depths instead, which does not fail or look wrong in isolation -- it makes occlusion
- * culling hide the things the player can see.
+ * <p>Measured rather than assumed, and the measurement came back against the assumption. This
+ * backend treats 26.2's depth as reversed everywhere else -- {@code DepthStencilState.DEFAULT} is
+ * {@code GREATER_THAN_OR_EQUAL} and {@code BlazeMaterials} mirrors every comparison on that basis --
+ * but the values sampled out of the level's depth texture run from 0 at the camera upward. Near is
+ * the <em>smaller</em> number here, so the farthest depth in a region is its <em>maximum</em>.
+ *
+ * <p>Which is why each texel carries both ends of its range rather than one. Occlusion culling needs
+ * only the far end, but a pyramid holding a single number cannot be checked against the convention
+ * it was built under: reduce the wrong way and every texel still looks like a plausible depth, and
+ * the only symptom is machinery vanishing where it should be visible. Carrying both means
+ * {@code DepthPyramidSelfTest} can read the convention off the pyramid and say so out loud.
  */
 public class DepthPyramid implements AutoCloseable {
 	/**
@@ -69,15 +79,6 @@ public class DepthPyramid implements AutoCloseable {
 			}
 			""";
 
-	/**
-	 * Makes the reduction write a constant instead of a depth, for telling two failures apart.
-	 *
-	 * <p>If a readback shows the constant, the draw and the target are fine and the depth fetch is
-	 * not. If it shows the same thing either way -- which is what happened -- then nothing is reading
-	 * the pyramid at all and the fault is downstream of it.
-	 */
-	private static final boolean PROBE = Boolean.getBoolean("flywheel.pyramidProbe");
-
 	private static final String FRAGMENT = """
 			#version 460 core
 
@@ -85,7 +86,7 @@ public class DepthPyramid implements AutoCloseable {
 
 			uniform sampler2D Source;
 
-			out float fragColor;
+			out vec2 fragColor;
 
 			void main() {
 				// The four texels of the level above that this one covers. textureGather would do it
@@ -95,18 +96,25 @@ public class DepthPyramid implements AutoCloseable {
 				ivec2 base = ivec2(gl_FragCoord.xy) * 2;
 				ivec2 limit = textureSize(Source, 0) - 1;
 
-				float a = texelFetch(Source, min(base, limit), 0).r;
-				float b = texelFetch(Source, min(base + ivec2(1, 0), limit), 0).r;
-				float c = texelFetch(Source, min(base + ivec2(0, 1), limit), 0).r;
-				float d = texelFetch(Source, min(base + ivec2(1, 1), limit), 0).r;
+				vec4 a = texelFetch(Source, min(base, limit), 0);
+				vec4 b = texelFetch(Source, min(base + ivec2(1, 0), limit), 0);
+				vec4 c = texelFetch(Source, min(base + ivec2(0, 1), limit), 0);
+				vec4 d = texelFetch(Source, min(base + ivec2(1, 1), limit), 0);
 
-				// Farthest, and on a reversed depth buffer that is the smallest.
-				fragColor = min(min(a, b), min(c, d));
-			#ifdef FLW_PYRAMID_PROBE
-				// A constant, to tell "the pass never wrote" from "the sample returned zero". If the
-				// readback shows this, the draw and the target are fine and the depth fetch is not.
-				fragColor = 0.5;
+			#ifdef FLW_PYRAMID_FROM_DEPTH
+				// The raw depth buffer has one channel, so both ends of the range start out equal.
+				vec2 pa = a.rr, pb = b.rr, pc = c.rr, pd = d.rr;
+			#else
+				vec2 pa = a.rg, pb = b.rg, pc = c.rg, pd = d.rg;
 			#endif
+
+				// Both ends carried up the chain: .r the nearest depth under this texel and .g the
+				// farthest. Occlusion culling needs only one of them, but which one depends on which
+				// way round the depth buffer runs -- and carrying both means that can be read off
+				// the pyramid rather than assumed, which is the one mistake here that would hide the
+				// world instead of showing it.
+				fragColor = vec2(min(min(pa.r, pb.r), min(pc.r, pd.r)),
+						max(max(pa.g, pb.g), max(pc.g, pd.g)));
 			}
 			""";
 
@@ -122,6 +130,9 @@ public class DepthPyramid implements AutoCloseable {
 	private int levels;
 
 	private @Nullable RenderPipeline pipeline;
+
+	/** The variant that reads the one-channel depth buffer, used for the first level. */
+	private @Nullable RenderPipeline depthPipeline;
 
 	/** Whether the reduction pipeline compiled, for anything asking why the chain is empty. */
 	private boolean valid;
@@ -188,7 +199,6 @@ public class DepthPyramid implements AutoCloseable {
 	public void build(GpuTexture depth, GpuTextureView depthView) {
 		ensure(Math.max(1, depth.getWidth(0) / DOWNSCALE), Math.max(1, depth.getHeight(0) / DOWNSCALE));
 
-		RenderPipeline reduce = pipeline();
 		CommandEncoder encoder = RenderSystem.getDevice()
 				.createCommandEncoder();
 
@@ -204,7 +214,7 @@ public class DepthPyramid implements AutoCloseable {
 			try (RenderPass pass = encoder.createRenderPass(() -> "flywheel depth pyramid",
 					levelViews[level], Optional.empty(), null, OptionalDouble.empty())) {
 
-				pass.setPipeline(reduce);
+				pass.setPipeline(pipeline(level == 0));
 				pass.bindTexture("Source", source, nearest);
 				// vertexCount, instanceCount, firstVertex, firstInstance -- the order vkCmdDraw
 				// takes them in, which RenderPass.draw passes straight through. Written as
@@ -345,7 +355,7 @@ public class DepthPyramid implements AutoCloseable {
 				| GpuTexture.USAGE_COPY_SRC;
 
 		texture = RenderSystem.getDevice()
-				.createTexture(() -> "flywheel depth pyramid", usage, GpuFormat.R32_FLOAT, w, h, 1,
+				.createTexture(() -> "flywheel depth pyramid", usage, GpuFormat.RG32_FLOAT, w, h, 1,
 						levels);
 
 		// One view per level, because a pass draws into exactly one mip and samples exactly one
@@ -356,35 +366,53 @@ public class DepthPyramid implements AutoCloseable {
 		}
 	}
 
-	private RenderPipeline pipeline() {
-		if (pipeline == null) {
-			String fragment = PROBE
-					? FRAGMENT.replace("#version 460 core", "#version 460 core\n#define FLW_PYRAMID_PROBE")
-					: FRAGMENT;
-
-			Identifier shaders = GeneratedShaders.pipeline("flywheel_depth_pyramid", VERTEX, fragment);
-
-			pipeline = RenderPipeline.builder()
-					.withLocation(Identifier.fromNamespaceAndPath("flywheel", "pipeline/depth_pyramid"))
-					.withVertexShader(shaders)
-					.withFragmentShader(shaders)
-					.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-					.withBindGroupLayout(LAYOUT)
-					// No depth state at all, which on 26.2 also means no depth attachment -- this
-					// draws a single triangle over a target it owns and has nothing to test against.
-					.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT,
-							ColorTargetState.WRITE_ALL))
-					.withCull(false)
-					.build();
-
-			// Checked, because Blaze3D compiles lazily and an invalid pipeline is not discovered
-			// until a draw uses it -- and a draw that never happens writes nothing and says nothing.
-			valid = RenderSystem.getDevice()
-					.precompilePipeline(pipeline)
-					.isValid();
+	/**
+	 * The reduction pipeline, in two variants.
+	 *
+	 * <p>The first level reads the raw depth buffer, which has one channel; every level after it
+	 * reads this texture, which has two. The same shader either way, one define apart.
+	 */
+	private RenderPipeline pipeline(boolean fromDepth) {
+		if (fromDepth) {
+			if (depthPipeline == null) {
+				depthPipeline = build("depth_pyramid_first", true);
+			}
+			return depthPipeline;
 		}
 
+		if (pipeline == null) {
+			pipeline = build("depth_pyramid", false);
+		}
 		return pipeline;
+	}
+
+	private RenderPipeline build(String name, boolean fromDepth) {
+		String fragment = fromDepth
+				? FRAGMENT.replace("#version 460 core", "#version 460 core\n#define FLW_PYRAMID_FROM_DEPTH")
+				: FRAGMENT;
+
+		Identifier shaders = GeneratedShaders.pipeline("flywheel_" + name, VERTEX, fragment);
+
+		RenderPipeline built = RenderPipeline.builder()
+				.withLocation(Identifier.fromNamespaceAndPath("flywheel", "pipeline/" + name))
+				.withVertexShader(shaders)
+				.withFragmentShader(shaders)
+				.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+				.withBindGroupLayout(LAYOUT)
+				// No depth state at all, which on 26.2 also means no depth attachment -- this draws
+				// a single triangle over a target it owns and has nothing to test against.
+				.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.RG32_FLOAT,
+						ColorTargetState.WRITE_ALL))
+				.withCull(false)
+				.build();
+
+		// Checked, because Blaze3D compiles lazily and an invalid pipeline is not discovered until a
+		// draw uses it -- and a draw that never happens writes nothing and says nothing.
+		valid = RenderSystem.getDevice()
+				.precompilePipeline(built)
+				.isValid();
+
+		return built;
 	}
 
 	private static int mipLevelsFor(int w, int h) {

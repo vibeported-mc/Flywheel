@@ -174,8 +174,8 @@ public final class DepthPyramidSelfTest {
 				return new Result(false, lines);
 			}
 
-			lines.add("level " + level + " (" + stats.texels + " texels): min " + stats.min + ", max "
-					+ stats.max + ", " + stats.nearerThanFar + " nearer than the far plane");
+			lines.add("level " + level + " (" + stats.texels + " texels): depths run from " + stats.min
+					+ " to " + stats.max);
 
 			// A depth is a depth: outside [0, 1] means the reduction read something that was not the
 			// depth buffer, which is the failure this is really looking for.
@@ -184,17 +184,21 @@ public final class DepthPyramidSelfTest {
 				return new Result(false, lines);
 			}
 
-			// A fraction rather than "any", because one stray texel proves nothing and the scene this
-			// runs in has ground across the bottom half of the screen.
-			float fraction = (float) stats.nearerThanFar / stats.texels;
-			lines.add("fraction nearer than the far plane: " + fraction);
-
-			if (fraction < 0.05f) {
-				lines.add("ALL AT THE FAR PLANE -- almost every texel is the far plane, so either the "
-						+ "scene really is empty sky or nothing was sampled at all. Occlusion culling "
-						+ "against this would hide the world, so it is a failure either way");
+			// A real scene has depth in it. All-equal means nothing was sampled, whichever end of
+			// the range that value happens to sit at, and occlusion culling against a flat pyramid
+			// either hides everything or hides nothing.
+			if (stats.max - stats.min < 1.0e-4f) {
+				lines.add("FLAT -- every texel holds the same depth, so nothing was really sampled");
 				return new Result(false, lines);
 			}
+
+			// Which end is near, read off the pyramid rather than assumed. Getting this backwards is
+			// the mistake that makes occlusion culling hide what the player can see.
+			lines.add(stats.max > 0.5f
+					? "the near end is the larger number, so this depth buffer is reversed and the "
+							+ "farthest depth in a region is its minimum"
+					: "the near end is the smaller number, so this depth buffer is conventional and "
+							+ "the farthest depth in a region is its maximum");
 
 			return new Result(true, lines);
 		} catch (Exception e) {
@@ -251,14 +255,16 @@ public final class DepthPyramidSelfTest {
 				}
 
 				ivec2 at = ivec2(int(i) % size.x, int(i) / size.x);
-				float d = texelFetch(_flw_pyramid, at, 0).r;
+
+				// Both channels: .r is the nearest depth under this texel and .g the farthest, so
+				// the two together give the whole range of depths in the frame. Which end means
+				// "near" is exactly the question this is here to answer.
+				vec2 range = texelFetch(_flw_pyramid, at, 0).rg;
 
 				// Compared as bit patterns, which is exact for non-negative floats: IEEE 754 orders
 				// them the same way the integers order. A depth is never negative, so this holds.
-				uint bits = floatBitsToUint(max(d, 0.0));
-
-				atomicMin(_flw_min, bits);
-				atomicMax(_flw_max, bits);
+				atomicMin(_flw_min, floatBitsToUint(max(range.r, 0.0)));
+				atomicMax(_flw_max, floatBitsToUint(max(range.g, 0.0)));
 			}
 			""";
 
