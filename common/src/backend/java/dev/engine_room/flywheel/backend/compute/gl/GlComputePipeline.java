@@ -76,8 +76,8 @@ public final class GlComputePipeline implements ComputePipeline {
 		out.append("#version ").append(glslVersion).append(" core\n");
 
 		// On OpenGL a binding layout carries no descriptor set. On Vulkan it will.
-		out.append("#define IB_GL 1\n");
-		out.append("#define IB_SET(n)\n");
+		out.append("#define FLW_GL 1\n");
+		out.append("#define FLW_SET(n)\n");
 
 		defines.forEach((key, value) -> out.append("#define ").append(key).append(' ').append(value).append('\n'));
 

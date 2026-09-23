@@ -31,7 +31,7 @@ public final class ComputeSelfTest {
 	private static final String SHADER = """
 			layout(local_size_x = 64) in;
 
-			layout(std430, IB_SET(0) binding = 0) writeonly buffer Output {
+			layout(std430, FLW_SET(0) binding = 0) writeonly buffer Output {
 				uint values[];
 			};
 

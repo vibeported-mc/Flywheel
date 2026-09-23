@@ -130,8 +130,8 @@ public final class VkComputePipeline implements ComputePipeline {
 	private static String prelude() {
 		return """
 				#version 460
-				#define IB_VK 1
-				#define IB_SET(n)
+				#define FLW_VK 1
+				#define FLW_SET(n)
 				#line 1
 				""";
 	}
