@@ -37,6 +37,20 @@ public final class BlazeStats {
 	public static volatile int crumblingCalls;
 
 	/**
+	 * Whether the OpenGL indirect backend entered its order-independent chain on the last frame.
+	 *
+	 * <p>Lives here, in the other backend's package, because it answers a question about this one:
+	 * comparing the two pictures says nothing about order independence unless the backend that has
+	 * it actually used it. Read by the transparency tests.
+	 *
+	 * <p>Sticky rather than per-frame. A test samples it over RPC at some arbitrary moment, and the
+	 * chain runs only on frames that have order-independent draws in view -- so a per-frame flag
+	 * reads false whenever the sample lands on a frame where the fluid was off screen, which is a
+	 * race a test cannot win and has nothing to do with what it is asking.
+	 */
+	public static volatile boolean oitChainRan;
+
+	/**
 	 * The fog ranges the last frame's uniforms were written with, in blocks.
 	 *
 	 * <p>Published because fog is invisible in the scenes worth testing in: at ten blocks in the

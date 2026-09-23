@@ -174,6 +174,10 @@ public class IndirectDrawManager extends DrawManager<IndirectInstancer<?>> {
 		}
 
 		if (useOit) {
+			dev.engine_room.flywheel.backend.engine.blaze.BlazeStats.oitChainRan = true;
+		}
+
+		if (useOit) {
 			oitFramebuffer.prepare();
 
 			oitFramebuffer.depthRange();
