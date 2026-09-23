@@ -11,7 +11,7 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.systems.RenderSystem;
 
 /**
- * Every mesh in one vertex buffer and one index buffer.
+ * Fixed geometry for the self-tests: every mesh in one vertex buffer and one index buffer.
  *
  * <p>This is what lets a single draw call cover models that have nothing to do with each other. An
  * indirect command names its geometry by offset -- {@code firstIndex}, {@code indexCount},
@@ -24,12 +24,12 @@ import com.mojang.blaze3d.systems.RenderSystem;
  * that proves the offsets and the draw path, and it is easier to be sure of when it cannot change
  * underneath anything.
  */
-public final class MeshPool implements AutoCloseable {
+public final class ProbeMeshPool implements AutoCloseable {
 	private final @Nullable GpuBuffer vertices;
 	private final @Nullable GpuBuffer indices;
 	private final List<Mesh> meshes;
 
-	private MeshPool(@Nullable GpuBuffer vertices, @Nullable GpuBuffer indices, List<Mesh> meshes) {
+	private ProbeMeshPool(@Nullable GpuBuffer vertices, @Nullable GpuBuffer indices, List<Mesh> meshes) {
 		this.vertices = vertices;
 		this.indices = indices;
 		this.meshes = meshes;
@@ -99,9 +99,9 @@ public final class MeshPool implements AutoCloseable {
 			return this;
 		}
 
-		public MeshPool build(String label) {
+		public ProbeMeshPool build(String label) {
 			if (positions.isEmpty()) {
-				return new MeshPool(null, null, List.of());
+				return new ProbeMeshPool(null, null, List.of());
 			}
 
 			List<Mesh> meshes = new ArrayList<>(positions.size());
@@ -143,7 +143,7 @@ public final class MeshPool implements AutoCloseable {
 
 			var device = RenderSystem.getDevice();
 
-			return new MeshPool(
+			return new ProbeMeshPool(
 					device.createBuffer(() -> label + " vertices",
 							GpuBuffer.USAGE_VERTEX | GpuBuffer.USAGE_COPY_DST, vertexData),
 					device.createBuffer(() -> label + " indices",

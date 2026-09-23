@@ -179,7 +179,7 @@ public final class CullSelfTest {
 		String defines = "#define INSTANCE_COUNT " + TOTAL_INSTANCES + "u\n"
 				+ "#define INSTANCES_PER_MODEL " + INSTANCES_PER_MODEL + "u\n";
 
-		try (MeshPool pool = MeshPool.builder()
+		try (ProbeMeshPool pool = ProbeMeshPool.builder()
 				.add(quad(-1.0f, 0.0f), order())
 				.add(quad(0.0f, 1.0f), order())
 				.build("flywheel cull probe");
@@ -393,12 +393,12 @@ public final class CullSelfTest {
 		return buffer.flip();
 	}
 
-	private static ByteBuffer drawParams(MeshPool pool) {
+	private static ByteBuffer drawParams(ProbeMeshPool pool) {
 		ByteBuffer buffer = ByteBuffer.allocateDirect(MODELS * 4 * Integer.BYTES)
 				.order(ByteOrder.nativeOrder());
 
 		for (int i = 0; i < MODELS; i++) {
-			MeshPool.Mesh mesh = pool.mesh(i);
+			ProbeMeshPool.Mesh mesh = pool.mesh(i);
 			buffer.putInt(mesh.indexCount())
 					.putInt(mesh.firstIndex())
 					.putInt(mesh.vertexOffset())

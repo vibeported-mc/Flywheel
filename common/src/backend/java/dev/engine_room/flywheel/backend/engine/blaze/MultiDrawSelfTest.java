@@ -127,7 +127,7 @@ public final class MultiDrawSelfTest {
 		var device = RenderSystem.getDevice();
 		CommandEncoder encoder = device.createCommandEncoder();
 
-		try (MeshPool pool = MeshPool.builder()
+		try (ProbeMeshPool pool = ProbeMeshPool.builder()
 				.add(quad(-1.0f, 0.0f), order())
 				.add(quad(0.0f, 1.0f), order())
 				.build("flywheel multi probe");
@@ -281,12 +281,12 @@ public final class MultiDrawSelfTest {
 	}
 
 	/** What compute needs to build a command: indexCount, firstIndex, vertexOffset, instanceCount. */
-	private static ByteBuffer drawParams(MeshPool pool) {
+	private static ByteBuffer drawParams(ProbeMeshPool pool) {
 		ByteBuffer buffer = ByteBuffer.allocateDirect(MODELS * 4 * Integer.BYTES)
 				.order(ByteOrder.nativeOrder());
 
 		for (int i = 0; i < MODELS; i++) {
-			MeshPool.Mesh mesh = pool.mesh(i);
+			ProbeMeshPool.Mesh mesh = pool.mesh(i);
 			buffer.putInt(mesh.indexCount())
 					.putInt(mesh.firstIndex())
 					.putInt(mesh.vertexOffset())
