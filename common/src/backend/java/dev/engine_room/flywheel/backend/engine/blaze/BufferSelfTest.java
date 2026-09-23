@@ -53,9 +53,17 @@ public final class BufferSelfTest {
 			ByteBuffer source = ByteBuffer.allocateDirect(BYTES)
 					.order(ByteOrder.nativeOrder());
 			for (int i = 0; i < VALUES; i++) {
+				source.putInt(i * Integer.BYTES, i * 3 + 7);
+			}
+			// The direct route first, then the staged one over the top with different values, so
+			// both are exercised on every machine rather than only whichever this device prefers.
+			// A route that is never taken here is a route first taken on somebody else's GPU.
+			Staging.uploadDirect(storage.slice(), source);
+
+			for (int i = 0; i < VALUES; i++) {
 				source.putInt(i * Integer.BYTES, i * 2 + 1);
 			}
-			encoder.writeToBuffer(storage.slice(), source);
+			Staging.uploadStaged(storage.slice(), source);
 
 			// The point of the exercise. Everything written above has to still be there afterwards,
 			// in a buffer object that is not the one it was written to.
