@@ -32,7 +32,7 @@ import net.minecraft.world.phys.Vec3;
  * sees an absolute position.
  */
 public class BlazeUniforms implements AutoCloseable {
-	/** mat4 viewProjection, vec4 cameraPos, float renderSeconds padded out to 16. */
+	/** mat4 viewProjection, vec4 cameraPos, then two floats padded out to 16. */
 	public static final int SIZE = 64 + 16 + 16;
 
 	public static final String BLOCK_NAME = "FlwFrame";
@@ -56,6 +56,7 @@ public class BlazeUniforms implements AutoCloseable {
 				mat4 flw_viewProjection;
 				vec4 flw_cameraPos;
 				float flw_renderSeconds;
+				float flw_renderTicks;
 			};
 			""";
 
@@ -75,7 +76,12 @@ public class BlazeUniforms implements AutoCloseable {
 				// Not the world time. A rotating shader multiplies this by an instance's speed to
 				// get an angle, so it has to advance smoothly between ticks or every cog in the
 				// world steps twenty times a second instead of turning.
-				.putFloat(renderSeconds(context));
+				.putFloat(renderSeconds(context))
+				// Both, because mods use both: a rotating shader works in seconds and a scrolling
+				// one in ticks. Declaring one in the block and writing only the other is not a
+				// wrong picture -- the shader compiles, the machine draws, and the part that was
+				// supposed to move simply does not.
+				.putFloat(renderSeconds(context) * 20.0f);
 
 		data.rewind();
 
