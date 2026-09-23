@@ -58,6 +58,25 @@ public final class PipelineSelfTest {
 			.withSampler("Sampler2")
 			.build();
 
+	/**
+	 * The same, plus the breaking texture.
+	 *
+	 * <p>A separate layout rather than one sampler added to the list above, because a pipeline whose
+	 * shader never reads a declared sampler is a warning on OpenGL and a wasted binding everywhere --
+	 * and there is exactly one shader in the backend that reads this one.
+	 */
+	public static final BindGroupLayout CRUMBLING_LAYOUT = BindGroupLayout.builder()
+			.withUniform(BlazeUniforms.BLOCK_NAME, UniformType.UNIFORM_BUFFER)
+			.withUniform(BlazeEnvironments.BLOCK_NAME, UniformType.UNIFORM_BUFFER)
+			.withUniform("_flw_instances", UniformType.TEXEL_BUFFER, GpuFormat.RGBA32_UINT)
+			.withUniform("_flw_visible", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
+			.withUniform("_flw_lightSections", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
+			.withUniform("_flw_lightLut", UniformType.TEXEL_BUFFER, GpuFormat.R32_UINT)
+			.withSampler("Sampler0")
+			.withSampler("Sampler1")
+			.withSampler("Sampler2")
+			.build();
+
 	private PipelineSelfTest() {
 	}
 
@@ -114,6 +133,12 @@ public final class PipelineSelfTest {
 
 	/** The same pipeline, with a material's fixed-function state baked into it. */
 	public static RenderPipeline pipelineFor(Identifier shaders, BlazeMaterials.Key material) {
+		return pipelineFor(shaders, material, false);
+	}
+
+	/** @param crumbling whether the shader reads the breaking texture, and so needs it declared */
+	public static RenderPipeline pipelineFor(Identifier shaders, BlazeMaterials.Key material,
+			boolean crumbling) {
 		return RenderPipeline.builder()
 				.withLocation(Identifier.fromNamespaceAndPath("flywheel",
 						"pipeline/" + shaders.getPath() + "/" + material.describe()))
@@ -121,7 +146,7 @@ public final class PipelineSelfTest {
 				.withFragmentShader(shaders)
 				.withVertexBinding(0, BlazeVertex.FORMAT)
 				.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-				.withBindGroupLayout(LAYOUT)
+				.withBindGroupLayout(crumbling ? CRUMBLING_LAYOUT : LAYOUT)
 				// DEFAULT is GREATER_THAN_OR_EQUAL, which is right rather than backwards: 26.2's
 				// depth buffer is reversed, near at 1 and far at 0. A pipeline naming no depth state
 				// gets no depth attachment at all and draws over everything.

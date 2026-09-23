@@ -29,6 +29,14 @@ public final class BlazeStats {
 	public static volatile int directCalls;
 
 	/**
+	 * Draws issued for the block-breaking overlay in the last frame that had any.
+	 *
+	 * <p>Not reset with the others, because crumbling is drawn in its own pass and most frames have
+	 * none -- zeroing it every frame would mean a test could only ever read it by winning a race.
+	 */
+	public static volatile int crumblingCalls;
+
+	/**
 	 * The fog ranges the last frame's uniforms were written with, in blocks.
 	 *
 	 * <p>Published because fog is invisible in the scenes worth testing in: at ten blocks in the

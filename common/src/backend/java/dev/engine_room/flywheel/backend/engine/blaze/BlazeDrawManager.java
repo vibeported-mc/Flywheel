@@ -15,6 +15,7 @@ import org.jspecify.annotations.Nullable;
 
 import com.mojang.blaze3d.IndexType;
 import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -24,16 +25,23 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import dev.engine_room.flywheel.api.backend.Engine;
 import dev.engine_room.flywheel.api.backend.RenderContext;
 import dev.engine_room.flywheel.api.instance.Instance;
+import dev.engine_room.flywheel.api.material.Material;
+import dev.engine_room.flywheel.api.material.Transparency;
+import dev.engine_room.flywheel.api.material.WriteMask;
 import dev.engine_room.flywheel.api.model.Model;
+import dev.engine_room.flywheel.lib.material.CutoutShaders;
+import dev.engine_room.flywheel.lib.material.FogShaders;
 import dev.engine_room.flywheel.backend.FlwBackend;
 import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
 import dev.engine_room.flywheel.backend.engine.AbstractInstancer;
 import dev.engine_room.flywheel.backend.engine.DrawManager;
+import dev.engine_room.flywheel.backend.engine.InstanceHandleImpl;
 import dev.engine_room.flywheel.backend.engine.InstancerKey;
 import dev.engine_room.flywheel.backend.engine.LightStorage;
 import dev.engine_room.flywheel.backend.engine.MaterialRenderState;
 import dev.engine_room.flywheel.backend.engine.embed.EnvironmentStorage;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.model.ModelBakery;
 import net.minecraft.core.Vec3i;
 
 /**
@@ -49,9 +57,10 @@ import net.minecraft.core.Vec3i;
  *
  * <h2>What this does not do yet</h2>
  *
- * <p>Fog, cutout and crumbling. Order-independent transparency falls back to ordinary blending, so
- * two overlapping translucent surfaces of Create's can sort wrongly against each other -- visibly
- * wrong where they overlap and right everywhere else, which is the honest interim.
+ * <p>The overlay texture, which is the red flash a damaged block entity gets. Order-independent
+ * transparency falls back to ordinary blending, so two overlapping translucent surfaces of Create's
+ * can sort wrongly against each other -- visibly wrong where they overlap and right everywhere else,
+ * which is the honest interim.
  */
 public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeMeshPool meshPool = new BlazeMeshPool();
@@ -60,9 +69,13 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeEnvironments environments = new BlazeEnvironments();
 	private final BlazeCull cull = new BlazeCull();
 	private final BlazeIdentity identity = new BlazeIdentity();
+	private final BlazeCrumbling crumbling = new BlazeCrumbling();
 
 	/** One pipeline per instance type, since the shader is generated from its layout. */
 	private final Map<PipelineKey, @Nullable GeneratedPipeline> pipelines = new HashMap<>();
+
+	/** The same, for the block-breaking variant, which is a different shader and layout. */
+	private final Map<PipelineKey, @Nullable GeneratedPipeline> crumblingPipelines = new HashMap<>();
 
 	private @Nullable RenderContext context;
 	private Vec3i renderOrigin = Vec3i.ZERO;
@@ -141,11 +154,179 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		submit(drawable, cull.dispatch(drawable, context, renderOrigin));
 	}
 
+	/**
+	 * The block-breaking overlay, drawn over instances a player is mining.
+	 *
+	 * <p>A separate pass rather than a material swap: every instance being broken is drawn a second
+	 * time, through a shader that replaces its colour with the breaking texture and leaves its alpha
+	 * alone. One draw per instance per mesh, which sounds extravagant and is not -- the list is the
+	 * blocks players currently have a pick in, so it is almost always empty and never long.
+	 */
 	@Override
 	public void renderCrumbling(List<Engine.CrumblingBlock> crumblingBlocks) {
-		// Not yet. Crumbling is a separate draw path rather than a material swap -- it draws the
-		// same instances again through a different pipeline with the destroy texture -- and it is
-		// worth having only once the ordinary path is right.
+		if (fallback || context == null || crumblingBlocks.isEmpty() || meshPool.isEmpty()) {
+			return;
+		}
+
+		List<CrumblingDraw> work = collectCrumbling(crumblingBlocks);
+		if (work.isEmpty()) {
+			return;
+		}
+
+		// Every upload first, because a staged one cannot be recorded inside an open render pass.
+		int[] indices = new int[work.size()];
+		for (int i = 0; i < work.size(); i++) {
+			indices[i] = work.get(i)
+					.index();
+		}
+		crumbling.prepare(indices, indices.length);
+
+		BlazeStats.crumblingCalls = 0;
+		submitCrumbling(work);
+	}
+
+	private List<CrumblingDraw> collectCrumbling(List<Engine.CrumblingBlock> crumblingBlocks) {
+		List<CrumblingDraw> work = new ArrayList<>();
+
+		for (Engine.CrumblingBlock block : crumblingBlocks) {
+			int progress = block.progress();
+
+			if (progress < 0 || progress >= ModelBakery.BREAKING_LOCATIONS.size()) {
+				continue;
+			}
+
+			for (Instance instance : block.instances()) {
+				// Checked rather than assumed: the list is every crumbling block in the level, and an
+				// instance another engine created would be read as one of ours from the wrong buffer.
+				if (!(instance.handle() instanceof InstanceHandleImpl<?> handle)) {
+					continue;
+				}
+				if (!(handle.state instanceof BlazeInstancer<?> instancer)) {
+					continue;
+				}
+				if (instancer.draws()
+						.isEmpty()) {
+					continue;
+				}
+
+				work.add(new CrumblingDraw(instancer, handle.index, progress));
+			}
+		}
+
+		return work;
+	}
+
+	private void submitCrumbling(List<CrumblingDraw> work) {
+		var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+		GpuTextureView color = target.getColorTextureView();
+		GpuTextureView depth = target.getDepthTextureView();
+
+		if (color == null) {
+			return;
+		}
+
+		CommandEncoder encoder = RenderSystem.getDevice()
+				.createCommandEncoder();
+
+		GpuTextureView lightmap = Minecraft.getInstance().gameRenderer.lightmap();
+
+		try (RenderPass pass = encoder.createRenderPass(() -> "flywheel crumbling", color,
+				Optional.empty(), depth, OptionalDouble.empty())) {
+
+			pass.setVertexBuffer(0, meshPool.vertices()
+					.slice());
+			pass.setIndexBuffer(meshPool.indices(), IndexType.INT);
+
+			for (int i = 0; i < work.size(); i++) {
+				drawCrumbling(pass, work.get(i), crumbling.slice(i), lightmap);
+			}
+		}
+	}
+
+	private void drawCrumbling(RenderPass pass, CrumblingDraw work, GpuBufferSlice selection,
+			GpuTextureView lightmap) {
+		BlazeInstancer<?> instancer = work.instancer();
+		var samplers = RenderSystem.getSamplerCache();
+
+		var instanceSlice = instancer.slice();
+		if (instanceSlice == null) {
+			return;
+		}
+
+		GpuTextureView cracks = textureOf(ModelBakery.BREAKING_LOCATIONS.get(work.progress()));
+		if (cracks == null) {
+			return;
+		}
+
+		var environment = environments.slice(environmentStorage, instancer.environment.matrixIndex());
+
+		for (BlazeDraw draw : instancer.draws()) {
+			if (draw.isEmpty()) {
+				continue;
+			}
+
+			GpuTextureView diffuse = textureOf(draw.material()
+					.texture());
+			if (diffuse == null) {
+				continue;
+			}
+
+			// The crumbling material, which is the draw's own with the parts that would make the
+			// overlay read as a separate object taken out: no fog, no lighting, colour written but
+			// not depth, and a polygon offset so it sits on the surface rather than fighting it.
+			var material = crumblingMaterial(draw.material());
+			GeneratedPipeline pipeline = crumblingPipelineFor(instancer, material);
+
+			if (pipeline == null) {
+				continue;
+			}
+
+			pass.setPipeline(pipeline.pipeline());
+			pass.setUniform(BlazeUniforms.BLOCK_NAME, uniforms.slice());
+			pass.setUniform(BlazeEnvironments.BLOCK_NAME, environment);
+			pass.setUniform("_flw_instances", instanceSlice);
+			pass.setUniform("_flw_visible", selection);
+			pass.setUniform("_flw_lightSections", light.sections());
+			pass.setUniform("_flw_lightLut", light.lut());
+
+			pass.bindTexture("Sampler0", diffuse, samplers.getClampToEdge(FilterMode.NEAREST));
+			pass.bindTexture("Sampler1", cracks, samplers.getClampToEdge(FilterMode.NEAREST));
+			pass.bindTexture("Sampler2", lightmap, samplers.getClampToEdge(FilterMode.LINEAR));
+
+			var mesh = draw.mesh();
+			// One instance, and which one is in the selection bound above rather than in
+			// firstInstance -- which Vulkan drops in silence when it is not zero.
+			pass.drawIndexed(mesh.indexCount(), 1, mesh.firstIndex(), mesh.baseVertex(), 0);
+			BlazeStats.crumblingCalls++;
+		}
+	}
+
+	/**
+	 * A material's crumbling twin, matching what the OpenGL backends build in
+	 * {@code CommonCrumbling}.
+	 *
+	 * <p>{@code WriteMask.COLOR} is the part worth naming: the overlay must not write depth, or it
+	 * occludes the very surface it is drawn on.
+	 */
+	private static BlazeMaterials.Key crumblingMaterial(Material base) {
+		return new BlazeMaterials.Key(Transparency.CRUMBLING, base.depthTest(), WriteMask.COLOR,
+				base.backfaceCulling(), true, FogShaders.NONE.source(),
+				CutoutShaders.ONE_TENTH.source());
+	}
+
+	private @Nullable GeneratedPipeline crumblingPipelineFor(BlazeInstancer<?> instancer,
+			BlazeMaterials.Key material) {
+		var key = new PipelineKey(instancer.type, material);
+
+		if (!crumblingPipelines.containsKey(key)) {
+			crumblingPipelines.put(key, GeneratedPipeline.of(instancer, material, true));
+		}
+
+		return crumblingPipelines.get(key);
+	}
+
+	/** One instance of one instancer, drawn again with the breaking texture at one stage. */
+	private record CrumblingDraw(BlazeInstancer<?> instancer, int index, int progress) {
 	}
 
 	@Override
@@ -162,7 +343,9 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		}
 
 		pipelines.clear();
+		crumblingPipelines.clear();
 
+		crumbling.close();
 		identity.close();
 		cull.close();
 		environments.close();

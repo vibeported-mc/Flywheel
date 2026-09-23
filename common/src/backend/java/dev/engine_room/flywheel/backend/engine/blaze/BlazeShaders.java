@@ -49,6 +49,18 @@ public final class BlazeShaders {
 			uniform usamplerBuffer _flw_lightLut;
 			""";
 
+	/** Only in the crumbling variant, so the ordinary shader carries no varying it never reads. */
+	private static final String CRUMBLING_VARYING = """
+			out vec2 v_crumblingTexCoord;
+			""";
+
+	/** Likewise, and in the fragment shader, where the breaking texture is the extra sampler. */
+	private static final String CRUMBLING_FRAGMENT_PREAMBLE = """
+			in vec2 v_crumblingTexCoord;
+
+			uniform sampler2D Sampler1;
+			""";
+
 	private static final String VARYINGS = """
 			out vec4 v_color;
 			out vec2 v_texCoord;
@@ -97,6 +109,28 @@ public final class BlazeShaders {
 			}
 			""";
 
+	/**
+	 * Where on the breaking texture a fragment of a model lands.
+	 *
+	 * <p>Vanilla's block-breaking overlay is a texture projected flat onto the world along whichever
+	 * axis a face most nearly points down, so the cracks line up across the faces of a block and do
+	 * not swim when it turns. Taken from Flywheel's own {@code common.vert} rather than reinvented,
+	 * because a projection that differs by a sign gives cracks that slide across a rotating cog.
+	 */
+	private static final String CRUMBLING_TEX_COORD = """
+			vec2 _flw_crumblingCoord(vec3 pos, vec3 normal) {
+				vec3 a = abs(normal);
+
+				if (a.y > a.x && a.y > a.z) {
+					return normal.y > 0.0 ? vec2(pos.x, pos.z) : vec2(pos.x, -pos.z);
+				}
+				if (a.x > a.z) {
+					return normal.x > 0.0 ? vec2(pos.z, -pos.y) : vec2(-pos.z, -pos.y);
+				}
+				return normal.z > 0.0 ? vec2(pos.x, -pos.y) : vec2(-pos.x, -pos.y);
+			}
+			""";
+
 	private static final String MAIN = """
 			void main() {
 				// Two hops, because what gets drawn was decided on the GPU. gl_InstanceID counts
@@ -116,6 +150,14 @@ public final class BlazeShaders {
 				flw_vertexNormal = _flw_a_normal;
 
 				flw_instanceVertex(instance);
+
+			#ifdef FLW_CRUMBLING
+				// Before the environment transform and after the body, which is where Flywheel's own
+				// vertex shader computes it -- the cracks are projected in the space the model was
+				// placed in, so a contraption carries its own cracks around with it rather than
+				// dragging them through a projection fixed to the world.
+				v_crumblingTexCoord = _flw_crumblingCoord(flw_vertexPos.xyz, flw_vertexNormal);
+			#endif
 
 				// The environment's transform, after the body and before the projection, which is
 				// where Flywheel's own shaders apply it. Everything mounted on a Create contraption
@@ -196,6 +238,32 @@ public final class BlazeShaders {
 	 * Testing after the lightmap instead would discard a cutout edge in a dark room and keep it in
 	 * a lit one, and fogging before the lightmap would light the fog.
 	 */
+	/**
+	 * The block-breaking overlay, which is a different fragment shader rather than a material swap.
+	 *
+	 * <p>It takes the model's alpha and the breaking texture's colour, and nothing else: no diffuse
+	 * shading, no lightmap, no fog. The overlay is meant to read as cracks drawn *on* the surface,
+	 * and a lit, shaded, fogged copy of it reads as a second object floating just above one.
+	 *
+	 * <p>The alpha is multiplied rather than replaced so the cracks stop where the model does --
+	 * without that, a cog's breaking overlay is an opaque square.
+	 */
+	private static final String CRUMBLING_FRAGMENT_MAIN = """
+			void main() {
+				vec4 color = texture(Sampler0, v_texCoord) * v_color;
+				vec4 cracks = texture(Sampler1, v_crumblingTexCoord);
+
+				color.rgb = cracks.rgb;
+				color.a *= cracks.a;
+
+				if (flw_discardPredicate(color)) {
+					discard;
+				}
+
+				fragColor = color;
+			}
+			""";
+
 	private static final String FRAGMENT_MAIN = """
 			void main() {
 				flw_distance = v_fogDistance.x;
@@ -226,9 +294,20 @@ public final class BlazeShaders {
 	 */
 	public static Identifier generate(InstanceType<?> type, int stride, Identifier fog,
 			Identifier cutout) throws IOException {
+		return generate(type, stride, fog, cutout, false);
+	}
+
+	/**
+	 * @param crumbling the block-breaking variant, which projects the breaking texture over the model
+	 *            and drops the lighting and fog that would make it read as a separate object
+	 */
+	public static Identifier generate(InstanceType<?> type, int stride, Identifier fog,
+			Identifier cutout, boolean crumbling) throws IOException {
 		String body = ShaderIncludes.read(type.vertexShader());
 
 		String vertex = "#version 460 core\n\n"
+				+ (crumbling ? "#define FLW_CRUMBLING\n" + CRUMBLING_VARYING + CRUMBLING_TEX_COORD
+						+ "\n" : "")
 				+ ATTRIBUTES + "\n"
 				+ BlazeUniforms.GLSL + "\n"
 				+ BlazeEnvironments.GLSL + "\n"
@@ -252,16 +331,18 @@ public final class BlazeShaders {
 		String fragment = "#version 460 core\n\n"
 				+ BlazeUniforms.GLSL + "\n"
 				+ FRAGMENT_PREAMBLE + "\n"
+				+ (crumbling ? CRUMBLING_FRAGMENT_PREAMBLE + "\n" : "")
 				+ ShaderIncludes.read(cutout) + "\n"
 				+ ShaderIncludes.read(fog) + "\n"
-				+ FRAGMENT_MAIN;
+				+ (crumbling ? CRUMBLING_FRAGMENT_MAIN : FRAGMENT_MAIN);
 
 		// Named after everything it was built from, so two instance types cannot collide and the
 		// same type does not regenerate under a new name every frame. The fog and cutout shaders are
 		// in the name because they are compiled into the fragment shader: leaving them out gave every
 		// material of one instance type the first material's fog, which in the overworld is no
 		// difference at all and in the nether is every machine standing out of a red wall.
-		String name = flatten(type.vertexShader()) + "__" + flatten(cutout) + "__" + flatten(fog);
+		String name = flatten(type.vertexShader()) + "__" + flatten(cutout) + "__" + flatten(fog)
+				+ (crumbling ? "__crumbling" : "");
 
 		return GeneratedShaders.pipeline(name, vertex, fragment);
 	}

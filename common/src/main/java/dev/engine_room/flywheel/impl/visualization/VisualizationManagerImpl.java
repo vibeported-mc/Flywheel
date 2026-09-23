@@ -273,10 +273,29 @@ public class VisualizationManagerImpl implements VisualizationManager {
 		lateInit().engine.render(context);
 	}
 
+	/**
+	 * The last non-empty count of block-breaking states the game offered, and how many of those had
+	 * a visual to draw cracks on.
+	 *
+	 * <p>Here because "no cracks" has two unrelated causes that look identical on screen: the game
+	 * offering nothing, and a backend dropping what it was offered. Reading the render state from
+	 * outside a frame cannot tell them apart -- it is reset between frames, so an honest zero and a
+	 * mistimed read give the same answer. These are recorded inside the frame, at the only point
+	 * where the question has a definite answer.
+	 *
+	 * <p>Sticky rather than per-frame, for the same reason: a test sampling them over RPC would
+	 * otherwise have to win a race against a value that is zero in almost every frame.
+	 */
+	public static volatile int lastBlockBreakingStates;
+
+	public static volatile int lastCrumblingVisuals;
+
 	private void renderCrumbling(RenderContext context, List<BlockBreakingRenderState> blockBreaking) {
 		if (blockBreaking.isEmpty()) {
 			return;
 		}
+
+		lastBlockBreakingStates = blockBreaking.size();
 
 		List<Engine.CrumblingBlock> crumblingBlocks = new ArrayList<>();
 
@@ -307,6 +326,8 @@ public class VisualizationManagerImpl implements VisualizationManager {
 
 			crumblingBlocks.add(new CrumblingBlockImpl(state.blockPos(), state.progress(), instances));
 		}
+
+		lastCrumblingVisuals = crumblingBlocks.size();
 
 		if (!crumblingBlocks.isEmpty()) {
 			lateInit().engine.renderCrumbling(context, crumblingBlocks);

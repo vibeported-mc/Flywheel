@@ -33,19 +33,25 @@ public record GeneratedPipeline(RenderPipeline pipeline, Identifier shaders) {
 	 */
 	public static @Nullable GeneratedPipeline of(BlazeInstancer<?> instancer,
 			BlazeMaterials.Key material) {
+		return of(instancer, material, false);
+	}
+
+	/** @param crumbling the block-breaking variant of the same instance type */
+	public static @Nullable GeneratedPipeline of(BlazeInstancer<?> instancer,
+			BlazeMaterials.Key material, boolean crumbling) {
 		int stride = MoreMath.align16(instancer.type.layout()
 				.byteSize());
 
 		Identifier shaders;
 		try {
 			shaders = BlazeShaders.generate(instancer.type, stride, material.fog(),
-					material.cutout());
+					material.cutout(), crumbling);
 		} catch (Exception e) {
 			FlwBackend.LOGGER.error("Could not assemble a shader for {}", instancer.type, e);
 			return null;
 		}
 
-		RenderPipeline pipeline = PipelineSelfTest.pipelineFor(shaders, material);
+		RenderPipeline pipeline = PipelineSelfTest.pipelineFor(shaders, material, crumbling);
 
 		if (!RenderSystem.getDevice()
 				.precompilePipeline(pipeline)
