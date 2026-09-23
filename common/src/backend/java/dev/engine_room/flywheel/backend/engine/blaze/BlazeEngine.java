@@ -26,6 +26,13 @@ import net.minecraft.world.level.LevelAccessor;
  * to a global the next caller has to have restored for them.
  */
 public class BlazeEngine extends EngineImpl {
+	/** The most recent draw manager of this kind, for readers that run between frames. */
+	private static @org.jspecify.annotations.Nullable BlazeDrawManager last;
+
+	public static @org.jspecify.annotations.Nullable BlazeDrawManager lastDrawManager() {
+		return last;
+	}
+
 	public BlazeEngine(LevelAccessor level, DrawManager<? extends AbstractInstancer<?>> drawManager,
 			int maxOriginDistance) {
 		super(level, drawManager, maxOriginDistance);
@@ -37,6 +44,10 @@ public class BlazeEngine extends EngineImpl {
 			// A draw manager is not handed the context, and this one needs it: the camera and the
 			// render origin are what its uniform block is built from.
 			if (drawManager() instanceof BlazeDrawManager blaze) {
+				// Remembered so anything outside the frame can reach what this frame built -- the
+				// depth pyramid in particular, which only holds a real scene while a frame is being
+				// drawn and is meaningless to rebuild from outside one.
+				last = blaze;
 				blaze.prepare(context, renderOrigin());
 			}
 

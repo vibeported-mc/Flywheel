@@ -1,0 +1,302 @@
+package dev.engine_room.flywheel.backend.engine.blaze;
+
+import java.util.Optional;
+import java.util.OptionalDouble;
+
+import org.jspecify.annotations.Nullable;
+
+import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.PrimitiveTopology;
+import com.mojang.blaze3d.pipeline.BindGroupLayout;
+import com.mojang.blaze3d.pipeline.ColorTargetState;
+import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.systems.CommandEncoder;
+import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
+
+import net.minecraft.resources.Identifier;
+
+/**
+ * A mip chain of the frame's depth, each texel holding the farthest depth beneath it.
+ *
+ * <p>What occlusion culling reads. A cull pass wanting to know whether an instance is hidden
+ * projects its bounding sphere to a rectangle on screen and asks this one question: is everything
+ * already drawn in that rectangle nearer than the sphere's nearest point? A pyramid answers it with
+ * a couple of texel reads at whichever level is coarse enough that the rectangle spans about a
+ * texel, instead of reading every depth under it.
+ *
+ * <h2>Why fragment passes</h2>
+ *
+ * <p>The usual way to build one is a compute shader writing to successive mips as storage images.
+ * Blaze3D 26.2 has no storage images and no compute-writable textures at all, so each level is a
+ * full-screen draw instead: three vertices, a fragment shader that reads four texels of the level
+ * above and keeps the farthest. Slower than a compute reduction and entirely adequate -- the whole
+ * chain is a few thousand pixels after the first level.
+ *
+ * <h2>Reversed depth</h2>
+ *
+ * <p>26.2 draws into a reversed depth buffer: near is 1, far is 0. So the farthest depth in a region
+ * is its <em>minimum</em>, and the reduction takes {@code min}. Taking {@code max} builds a pyramid
+ * of near depths instead, which does not fail or look wrong in isolation -- it makes occlusion
+ * culling hide the things the player can see.
+ */
+public class DepthPyramid implements AutoCloseable {
+	/**
+	 * The chain starts at half the screen, which is the usual compromise.
+	 *
+	 * <p>Full resolution costs four times as much to build and buys precision that occlusion culling
+	 * throws away anyway: the test is deliberately conservative, and a false "visible" only costs the
+	 * work of drawing something hidden.
+	 */
+	private static final int DOWNSCALE = 2;
+
+	private static final String VERTEX = """
+			#version 460 core
+
+			out vec2 v_uv;
+
+			void main() {
+				// One triangle covering the screen, from the vertex index alone -- no vertex buffer,
+				// no index buffer, nothing to bind. Two of its corners are off screen, which is the
+				// point: a single triangle has no seam down the middle the way two do.
+				vec2 corner = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+				v_uv = corner;
+				gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
+			}
+			""";
+
+	private static final String FRAGMENT = """
+			#version 460 core
+
+			in vec2 v_uv;
+
+			uniform sampler2D Source;
+
+			out float fragColor;
+
+			void main() {
+				// The four texels of the level above that this one covers. textureGather would do it
+				// in one fetch; four explicit offsets are used instead because the source of the
+				// first level is the depth buffer rather than this texture, and the two do not
+				// necessarily agree about what a gather returns.
+				ivec2 base = ivec2(gl_FragCoord.xy) * 2;
+				ivec2 limit = textureSize(Source, 0) - 1;
+
+				float a = texelFetch(Source, min(base, limit), 0).r;
+				float b = texelFetch(Source, min(base + ivec2(1, 0), limit), 0).r;
+				float c = texelFetch(Source, min(base + ivec2(0, 1), limit), 0).r;
+				float d = texelFetch(Source, min(base + ivec2(1, 1), limit), 0).r;
+
+				// Farthest, and on a reversed depth buffer that is the smallest.
+				fragColor = min(min(a, b), min(c, d));
+			}
+			""";
+
+	private static final BindGroupLayout LAYOUT = BindGroupLayout.builder()
+			.withSampler("Source")
+			.build();
+
+	private @Nullable GpuTexture texture;
+	private final GpuTextureView[] levelViews;
+
+	private int width;
+	private int height;
+	private int levels;
+
+	private @Nullable RenderPipeline pipeline;
+
+	/**
+	 * One level, copied out every frame so anything outside the frame can look at it.
+	 *
+	 * <p>Copied rather than read on demand because {@code copyTextureToBuffer} is asynchronous and
+	 * says so only through a callback: a copy started and read in the same breath returns whatever
+	 * was in that memory, which came back as NaN. Started inside the frame and read later, the copy
+	 * has long since landed.
+	 */
+	private @Nullable GpuBuffer sample;
+
+	private int sampleLevel;
+	private int sampleTexels;
+
+	public DepthPyramid() {
+		levelViews = new GpuTextureView[32];
+	}
+
+	public GpuTexture texture() {
+		if (texture == null) {
+			throw new IllegalStateException("the pyramid has not been built yet");
+		}
+		return texture;
+	}
+
+	public int width() {
+		return width;
+	}
+
+	public int height() {
+		return height;
+	}
+
+	public int levels() {
+		return levels;
+	}
+
+	/** Reduces the given depth texture into the chain, one full-screen draw per level. */
+	public void build(GpuTexture depth) {
+		ensure(Math.max(1, depth.getWidth(0) / DOWNSCALE), Math.max(1, depth.getHeight(0) / DOWNSCALE));
+
+		RenderPipeline reduce = pipeline();
+		CommandEncoder encoder = RenderSystem.getDevice()
+				.createCommandEncoder();
+
+		var samplers = RenderSystem.getSamplerCache();
+		var nearest = samplers.getClampToEdge(FilterMode.NEAREST);
+
+		// The first level reads the real depth buffer; every later one reads the level above. The
+		// source is always a different texture or a different mip than the target, which is what
+		// keeps this legal -- a pass may not sample the mip it is drawing into.
+		try (GpuTextureView depthView = RenderSystem.getDevice()
+				.createTextureView(depth)) {
+
+			for (int level = 0; level < levels; level++) {
+				GpuTextureView source = level == 0 ? depthView : levelViews[level - 1];
+
+				try (RenderPass pass = encoder.createRenderPass(() -> "flywheel depth pyramid",
+						levelViews[level], Optional.empty(), null, OptionalDouble.empty())) {
+
+					pass.setPipeline(reduce);
+					pass.bindTexture("Source", source, nearest);
+					pass.draw(0, 3, 0, 1);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Starts the copy of one level into the buffer {@link #sample()} returns.
+	 *
+	 * <p>Call from inside the frame, right after building. Nothing waits on it.
+	 */
+	public void sampleLevel(int level) {
+		if (texture == null || level >= levels) {
+			return;
+		}
+
+		int texels = texture.getWidth(level) * texture.getHeight(level);
+
+		if (sample == null || sampleLevel != level || sampleTexels != texels) {
+			if (sample != null) {
+				sample.close();
+			}
+			sample = RenderSystem.getDevice()
+					.createBuffer(() -> "flywheel depth pyramid sample",
+							GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST,
+							(long) texels * Float.BYTES);
+			sampleLevel = level;
+			sampleTexels = texels;
+		}
+
+		RenderSystem.getDevice()
+				.createCommandEncoder()
+				.copyTextureToBuffer(texture, sample, 0, () -> {
+				}, level);
+	}
+
+	public @Nullable GpuBuffer sample() {
+		return sample;
+	}
+
+	public int sampleTexels() {
+		return sampleTexels;
+	}
+
+	public int sampledLevel() {
+		return sampleLevel;
+	}
+
+	@Override
+	public void close() {
+		for (int i = 0; i < levels; i++) {
+			if (levelViews[i] != null) {
+				levelViews[i].close();
+				levelViews[i] = null;
+			}
+		}
+
+		if (texture != null) {
+			texture.close();
+			texture = null;
+		}
+
+		if (sample != null) {
+			sample.close();
+			sample = null;
+			sampleTexels = 0;
+		}
+
+		levels = 0;
+		width = 0;
+		height = 0;
+	}
+
+	private void ensure(int w, int h) {
+		if (texture != null && w == width && h == height) {
+			return;
+		}
+
+		close();
+
+		width = w;
+		height = h;
+		levels = mipLevelsFor(w, h);
+
+		int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING
+				| GpuTexture.USAGE_COPY_SRC;
+
+		texture = RenderSystem.getDevice()
+				.createTexture(() -> "flywheel depth pyramid", usage, GpuFormat.R32_FLOAT, w, h, 1,
+						levels);
+
+		// One view per level, because a pass draws into exactly one mip and samples exactly one
+		// other. A view of the whole chain cannot say which.
+		for (int level = 0; level < levels; level++) {
+			levelViews[level] = RenderSystem.getDevice()
+					.createTextureView(texture, level, 1);
+		}
+	}
+
+	private RenderPipeline pipeline() {
+		if (pipeline == null) {
+			Identifier shaders = GeneratedShaders.pipeline("flywheel_depth_pyramid", VERTEX, FRAGMENT);
+
+			pipeline = RenderPipeline.builder()
+					.withLocation(Identifier.fromNamespaceAndPath("flywheel", "pipeline/depth_pyramid"))
+					.withVertexShader(shaders)
+					.withFragmentShader(shaders)
+					.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+					.withBindGroupLayout(LAYOUT)
+					// No depth state at all, which on 26.2 also means no depth attachment -- this
+					// draws a single triangle over a target it owns and has nothing to test against.
+					.withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT,
+							ColorTargetState.WRITE_ALL))
+					.withCull(false)
+					.build();
+		}
+
+		return pipeline;
+	}
+
+	private static int mipLevelsFor(int w, int h) {
+		int levels = 1;
+		while (w > 1 || h > 1) {
+			w = Math.max(1, w / 2);
+			h = Math.max(1, h / 2);
+			levels++;
+		}
+		return levels;
+	}
+}

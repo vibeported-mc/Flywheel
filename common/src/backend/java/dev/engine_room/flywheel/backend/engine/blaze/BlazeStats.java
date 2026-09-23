@@ -50,6 +50,9 @@ public final class BlazeStats {
 	 */
 	public static volatile boolean oitChainRan;
 
+	/** How many levels the depth pyramid was built with last frame, or zero if it was not. */
+	public static volatile int depthPyramidLevels;
+
 	/**
 	 * The fog ranges the last frame's uniforms were written with, in blocks.
 	 *

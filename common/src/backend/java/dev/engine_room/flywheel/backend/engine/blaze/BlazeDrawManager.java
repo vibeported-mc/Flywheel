@@ -72,6 +72,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeCull cull = new BlazeCull();
 	private final BlazeIdentity identity = new BlazeIdentity();
 	private final BlazeCrumbling crumbling = new BlazeCrumbling();
+	private final DepthPyramid depthPyramid = new DepthPyramid();
 
 	/** One pipeline per instance type, since the shader is generated from its layout. */
 	private final Map<PipelineKey, @Nullable GeneratedPipeline> pipelines = new HashMap<>();
@@ -158,9 +159,50 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			return;
 		}
 
+		// The depth of what has already been drawn this frame, reduced to a mip chain. Built here,
+		// inside the frame and after the terrain, because that is the only moment it holds anything:
+		// Minecraft clears the depth buffer every frame, so a pyramid built from outside the frame
+		// is a pyramid of the far plane, and occlusion culling against one of those hides the world.
+		buildDepthPyramid();
+
 		// Before the render pass, not inside it. A compute dispatch is illegal inside a render pass on
 		// Vulkan, and on OpenGL it would bind a program out from under the draws already recorded.
 		submit(drawable, cull.dispatch(drawable, context, renderOrigin));
+	}
+
+	/**
+	 * Reduces this frame's depth into the pyramid occlusion culling reads.
+	 *
+	 * <p>Kept alive between frames rather than rebuilt from scratch, so the texture holds the last
+	 * frame it was given even when nothing is looking -- which is what lets a test read it back at
+	 * an arbitrary moment and see a real scene rather than a cleared buffer.
+	 */
+	private void buildDepthPyramid() {
+		var depth = Minecraft.getInstance().gameRenderer.mainRenderTarget()
+				.getDepthTexture();
+
+		if (depth == null) {
+			return;
+		}
+
+		try {
+			depthPyramid.build(depth);
+			BlazeStats.depthPyramidLevels = depthPyramid.levels();
+
+			// Fine enough that solid ground reads as ground rather than as the sky behind it, which
+			// is what anything checking the pyramid needs to see.
+			depthPyramid.sampleLevel(Math.min(2, depthPyramid.levels() - 1));
+		} catch (Exception e) {
+			// One bad frame should not take the renderer down with it, and a pyramid is an
+			// optimisation: without it the cull pass simply tests fewer things.
+			FlwBackend.LOGGER.error("Could not build the depth pyramid; occlusion culling is off", e);
+			BlazeStats.depthPyramidLevels = 0;
+		}
+	}
+
+	/** The pyramid as last built, for anything that wants to read it back. */
+	public DepthPyramid depthPyramid() {
+		return depthPyramid;
 	}
 
 	/**
@@ -359,6 +401,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		crumblingPipelines.clear();
 
 		crumbling.close();
+		depthPyramid.close();
 		identity.close();
 		cull.close();
 		environments.close();
