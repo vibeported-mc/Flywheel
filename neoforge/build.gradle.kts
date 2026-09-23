@@ -134,6 +134,23 @@ tasks.named<Jar>("jar") {
     layers.filter { it != main }.forEach { from(it.output) }
 }
 
+// And so must a project dependency on this one, which is what a composite build resolves to.
+//
+// Gradle prefers a secondary `classes` variant over the jar when one project consumes another, to
+// skip the packaging step. That is normally invisible and right, but here the jar is the only thing
+// that carries api/lib/backend -- `apiElements` and `runtimeElements` describe the `main` source set
+// alone. A build using `includeBuild("../Flywheel")` therefore compiled against a Flywheel missing
+// nearly all of itself, and said so as thousands of "package does not exist" errors naming types
+// that plainly do exist.
+//
+// Dropping those variants costs this project's consumers the compile-avoidance shortcut and leaves
+// publication untouched, since the jar was always what got published.
+listOf("apiElements", "runtimeElements").forEach { name ->
+    configurations.named(name) {
+        outgoing.variants.removeIf { it.name == "classes" || it.name == "resources" }
+    }
+}
+
 tasks.named<Jar>("sourcesJar") {
     layers.filter { it != main }.forEach { from(it.allSource) }
 }

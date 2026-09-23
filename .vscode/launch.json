@@ -9,7 +9,7 @@
         "group": "Mod Development - neoforge",
         "order": 0
       },
-      "projectName": "neoforge",
+      "projectName": "Flywheel-neoforge",
       "mainClass": "net.neoforged.devlaunch.Main",
       "args": [
         "@D:\\dev\\vibeported-mc\\create-26.2\\Flywheel\\neoforge\\build\\moddev\\clientRunProgramArgs.txt"
@@ -31,7 +31,7 @@
         "group": "Mod Development - neoforge",
         "order": 1
       },
-      "projectName": "neoforge",
+      "projectName": "Flywheel-neoforge",
       "mainClass": "net.neoforged.devlaunch.Main",
       "args": [
         "@D:\\dev\\vibeported-mc\\create-26.2\\Flywheel\\neoforge\\build\\moddev\\serverRunProgramArgs.txt"
