@@ -24,14 +24,14 @@ import dev.engine_room.flywheel.backend.InternalVertex;
  */
 public final class BlazeVertex {
 	public static final VertexFormat FORMAT = VertexFormat.builder(0)
-			.addAttribute("flw_position", GpuFormat.RGB32_FLOAT)
-			.addAttribute("flw_color", GpuFormat.RGBA8_UNORM)
-			.addAttribute("flw_texCoord", GpuFormat.RG32_FLOAT)
-			.addAttribute("flw_overlay", GpuFormat.RG16_SINT)
-			.addAttribute("flw_light", GpuFormat.RG16_UINT)
+			.addAttribute("_flw_a_position", GpuFormat.RGB32_FLOAT)
+			.addAttribute("_flw_a_color", GpuFormat.RGBA8_UNORM)
+			.addAttribute("_flw_a_texCoord", GpuFormat.RG32_FLOAT)
+			.addAttribute("_flw_a_overlay", GpuFormat.RG16_SINT)
+			.addAttribute("_flw_a_light", GpuFormat.RG16_UINT)
 			// Advanced by 4 rather than its own 3 bytes, because InternalVertex pads the normal out
 			// to a 36-byte stride -- and a vertex size that is not a multiple of 4 is rejected.
-			.addAttribute("flw_normal", 4, GpuFormat.RGB8_SNORM)
+			.addAttribute("_flw_a_normal", 4, GpuFormat.RGB8_SNORM)
 			.build();
 
 	static {

@@ -34,16 +34,18 @@ public final class BlazeShaders {
 			""";
 
 	private static final String ATTRIBUTES = """
-			in vec3 flw_position;
-			in vec4 flw_color;
-			in vec2 flw_texCoord;
-			in ivec2 flw_overlay;
-			in uvec2 flw_light;
-			in vec3 flw_normal;
+			in vec3 _flw_a_position;
+			in vec4 _flw_a_color;
+			in vec2 _flw_a_texCoord;
+			in ivec2 _flw_a_overlay;
+			in uvec2 _flw_a_light;
+			in vec3 _flw_a_normal;
 			""";
 
 	private static final String BUFFERS = """
 			uniform usamplerBuffer _flw_instances;
+			uniform usamplerBuffer _flw_lightSections;
+			uniform usamplerBuffer _flw_lightLut;
 			""";
 
 	private static final String VARYINGS = """
@@ -72,6 +74,23 @@ public final class BlazeShaders {
 			}
 			""";
 
+	/**
+	 * The two functions {@code light_lut.glsl} declares and leaves to the backend.
+	 *
+	 * <p>The OpenGL backend answers them from storage buffers. Here they come from texel buffers,
+	 * which is the only shape Blaze3D can describe to a draw -- the lookup logic itself is shared,
+	 * unchanged, so the two backends cannot disagree about how a light is found.
+	 */
+	private static final String LIGHT_ACCESSORS = """
+			uint _flw_indexLut(uint index) {
+				return texelFetch(_flw_lightLut, int(index)).r;
+			}
+			
+			uint _flw_indexLight(uint index) {
+				return texelFetch(_flw_lightSections, int(index)).r;
+			}
+			""";
+
 	private static final String MAIN = """
 			void main() {
 				// Straight by instance id, for now. Once the cull pass is wired this becomes two
@@ -79,14 +98,14 @@ public final class BlazeShaders {
 				// instance -- which is the arrangement CullSelfTest already draws correctly.
 				FlwInstance instance = _flw_unpackInstance(uint(gl_InstanceID));
 
-				flw_vertexPos = vec4(flw_position, 1.0);
-				flw_vertexColor = flw_color;
-				flw_vertexTexCoord = flw_texCoord;
-				flw_vertexOverlay = flw_overlay;
+				flw_vertexPos = vec4(_flw_a_position, 1.0);
+				flw_vertexColor = _flw_a_color;
+				flw_vertexTexCoord = _flw_a_texCoord;
+				flw_vertexOverlay = _flw_a_overlay;
 				// Divided by 256, which is the scale a mod's body expects -- Create's rotating
 				// shader maxes this against `vec2(instance.light) / 256.`.
-				flw_vertexLight = vec2(flw_light) / 256.0;
-				flw_vertexNormal = flw_normal;
+				flw_vertexLight = vec2(_flw_a_light) / 256.0;
+				flw_vertexNormal = _flw_a_normal;
 
 				flw_instanceVertex(instance);
 
@@ -100,6 +119,17 @@ public final class BlazeShaders {
 				v_color = flw_vertexColor;
 				v_texCoord = flw_vertexTexCoord;
 				v_light = flw_vertexLight;
+
+				// Flywheel's light volume, consulted after the body so a visual that sets its own
+				// per-instance light still wins where it is brighter -- which is what a mod's
+				// `max(vec2(instance.light) / 256., flw_vertexLight)` is written against.
+				//
+				// Some visuals have nothing else: Create's track implements ShaderLightVisual and
+				// never sets an instance light at all, so without this every curve renders black.
+				FlwLightAo _flw_volume;
+				if (flw_light(flw_vertexPos.xyz, flw_vertexNormal, _flw_volume)) {
+					v_light = max(v_light, _flw_volume.light);
+				}
 
 				// Minecraft's per-face brightness, which is what stops a blocky model reading as a
 				// flat silhouette. Chunk geometry gets this baked into its vertex colour by the
@@ -156,6 +186,13 @@ public final class BlazeShaders {
 				+ InstanceGlsl.texelAccessor(stride) + "\n"
 				+ InstanceGlsl.unpack(type.layout()) + "\n"
 				+ GLOBALS + "\n"
+				// The struct the lookup hands back, which lives in a different file to the lookup.
+				+ "struct FlwLightAo { vec2 light; float ao; };\n"
+				+ LIGHT_ACCESSORS + "\n"
+				// Flywheel's own lookup, pasted in rather than reimplemented: it is the definition
+				// of how a light is found, and a second copy of that would drift from this one.
+				+ ShaderIncludes.read(Identifier.fromNamespaceAndPath("flywheel",
+						"internal/light_lut.glsl")) + "\n"
 				+ DIFFUSE + "\n"
 				+ VARYINGS + "\n"
 				+ body + "\n"

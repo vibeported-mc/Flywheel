@@ -32,8 +32,8 @@ import net.minecraft.world.phys.Vec3;
  * sees an absolute position.
  */
 public class BlazeUniforms implements AutoCloseable {
-	/** mat4 viewProjection, vec4 cameraPos, then two floats padded out to 16. */
-	public static final int SIZE = 64 + 16 + 16;
+	/** mat4 viewProjection, vec4 cameraPos, two floats padded to 16, then ivec4 renderOrigin. */
+	public static final int SIZE = 64 + 16 + 16 + 16;
 
 	public static final String BLOCK_NAME = "FlwFrame";
 
@@ -57,7 +57,13 @@ public class BlazeUniforms implements AutoCloseable {
 				vec4 flw_cameraPos;
 				float flw_renderSeconds;
 				float flw_renderTicks;
+				ivec4 _flw_renderOrigin;
 			};
+
+			// Flywheel's light lookup names it as an ivec3. Declared as an ivec4 above for the same
+			// reason the camera is -- std140 packs a three-component member and Std140Builder does
+			// not -- and narrowed here so the name the shared GLSL expects is the one it gets.
+			#define flw_renderOrigin _flw_renderOrigin.xyz
 			""";
 
 	private @Nullable GpuBuffer buffer;
@@ -81,7 +87,10 @@ public class BlazeUniforms implements AutoCloseable {
 				// one in ticks. Declaring one in the block and writing only the other is not a
 				// wrong picture -- the shader compiles, the machine draws, and the part that was
 				// supposed to move simply does not.
-				.putFloat(renderSeconds(context) * 20.0f);
+				.putFloat(renderSeconds(context) * 20.0f)
+					// Where the light volume is anchored. Instance positions are relative to it and
+					// the lookup adds it back to reach an absolute block position.
+					.putIVec4(renderOrigin.getX(), renderOrigin.getY(), renderOrigin.getZ(), 0);
 
 		data.rewind();
 

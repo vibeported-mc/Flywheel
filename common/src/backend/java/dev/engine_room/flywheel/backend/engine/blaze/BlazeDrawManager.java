@@ -54,6 +54,7 @@ import net.minecraft.core.Vec3i;
 public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private final BlazeMeshPool meshPool = new BlazeMeshPool();
 	private final BlazeUniforms uniforms = new BlazeUniforms();
+	private final BlazeLight light = new BlazeLight();
 
 	/** One pipeline per instance type, since the shader is generated from its layout. */
 	private final Map<Object, @Nullable GeneratedPipeline> pipelines = new HashMap<>();
@@ -111,6 +112,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		}
 
 		uniforms.update(context, renderOrigin);
+		light.flush(lightStorage);
 
 		List<BlazeInstancer<?>> drawable = new ArrayList<>();
 		for (BlazeInstancer<?> instancer : instancers.values()) {
@@ -151,6 +153,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 
 		pipelines.clear();
 
+		light.close();
 		meshPool.close();
 		uniforms.close();
 		GeneratedShaders.clear();
@@ -197,6 +200,13 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			return;
 		}
 
+		// Every declared binding must be supplied, and these are never absent: an empty volume is
+		// a buffer of zeros rather than nothing. Skipping the draw when there was no light yet is
+		// what made every machine in the world vanish -- a world with no light-using visual in it
+		// still has machines to draw.
+		var lightSections = light.sections();
+		var lightLut = light.lut();
+
 		var instanceSlice = instancer.slice();
 		if (instanceSlice == null) {
 			return;
@@ -205,6 +215,8 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		pass.setPipeline(pipeline.pipeline());
 		pass.setUniform(BlazeUniforms.BLOCK_NAME, uniforms.slice());
 		pass.setUniform("_flw_instances", instanceSlice);
+		pass.setUniform("_flw_lightSections", lightSections);
+		pass.setUniform("_flw_lightLut", lightLut);
 
 		var samplers = RenderSystem.getSamplerCache();
 		GpuTextureView lightmap = Minecraft.getInstance().gameRenderer.lightmap();
