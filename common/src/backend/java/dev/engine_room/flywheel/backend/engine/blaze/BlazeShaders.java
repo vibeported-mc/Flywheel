@@ -71,6 +71,11 @@ public final class BlazeShaders {
 			// measured from is the one the projection was applied to, and recovering that from a
 			// depth value is both harder and wrong at the edges.
 			out vec2 v_fogDistance;
+			// The position and normal the mod's body left behind, because lighting is decided per
+			// fragment. A mod's light shader is written against `flw_vertexPos` and
+			// `flw_vertexNormal` in the fragment stage, so those are what has to arrive there.
+			out vec3 v_pos;
+			out vec3 v_normal;
 			""";
 
 	/**
@@ -179,16 +184,13 @@ public final class BlazeShaders {
 				v_texCoord = flw_vertexTexCoord;
 				v_light = flw_vertexLight;
 
-				// Flywheel's light volume, consulted after the body so a visual that sets its own
-				// per-instance light still wins where it is brighter -- which is what a mod's
-				// `max(vec2(instance.light) / 256., flw_vertexLight)` is written against.
-				//
-				// Some visuals have nothing else: Create's track implements ShaderLightVisual and
-				// never sets an instance light at all, so without this every curve renders black.
-				FlwLightAo _flw_volume;
-				if (flw_light(flw_vertexPos.xyz, flw_vertexNormal, _flw_volume)) {
-					v_light = max(v_light, _flw_volume.light);
-				}
+				// The light volume is consulted in the fragment shader rather than here, because
+				// which lookup to do is the material's choice and its three answers are written
+				// against the fragment stage. Doing it here also meant doing it one way for
+				// everything, so a material asking for flat lighting got smooth and one asking for
+				// smooth-only-when-embedded got it everywhere.
+				v_pos = flw_vertexPos.xyz;
+				v_normal = flw_vertexNormal;
 
 				// Minecraft's per-face brightness, which is what stops a blocky model reading as a
 				// flat silhouette. Chunk geometry gets this baked into its vertex colour by the
@@ -218,6 +220,8 @@ public final class BlazeShaders {
 			in vec2 v_light;
 			in float v_shade;
 			in vec2 v_fogDistance;
+			in vec3 v_pos;
+			in vec3 v_normal;
 
 			uniform sampler2D Sampler0;
 			uniform sampler2D Sampler2;
@@ -228,6 +232,23 @@ public final class BlazeShaders {
 			// that is the shape `flw_fogFilter` was given long before this backend existed.
 			float flw_distance;
 			float flw_cylindricalDistance;
+
+			// And the names the light shaders are written against, which are the vertex globals
+			// again -- a light shader runs in the fragment stage but reads the position and normal
+			// the mod's vertex body left behind.
+			vec4 flw_vertexPos;
+			vec3 flw_vertexNormal;
+			vec2 flw_fragLight;
+			vec4 flw_fragColor;
+
+			// The one field of Flywheel's material struct that a light shader reads. Declared as a
+			// struct rather than a bare bool because `flw_material.ambientOcclusion` is the spelling
+			// the shipped light shaders use, and those are pasted in unchanged.
+			struct FlwMaterial {
+				bool ambientOcclusion;
+			};
+
+			FlwMaterial flw_material;
 			""";
 
 	/**
@@ -268,15 +289,29 @@ public final class BlazeShaders {
 			void main() {
 				flw_distance = v_fogDistance.x;
 				flw_cylindricalDistance = v_fogDistance.y;
+				flw_vertexPos = vec4(v_pos, 1.0);
+				flw_vertexNormal = v_normal;
 
-				vec4 color = texture(Sampler0, v_texCoord) * v_color;
+				flw_fragColor = texture(Sampler0, v_texCoord) * v_color;
+				flw_fragLight = v_light;
+				flw_material.ambientOcclusion = FLW_AMBIENT_OCCLUSION;
+
+				// The material's own light lookup, which is one of three and is the material's choice
+				// rather than the backend's. It takes a max against the light the instance already
+				// carried, so a visual that sets its own light keeps it wherever that is brighter --
+				// and a visual that sets none, like Create's track, gets all of its light from here.
+				//
+				// It can also darken the colour, which is what ambient occlusion is.
+				flw_shaderLight();
+
+				vec4 color = flw_fragColor;
 
 				if (flw_discardPredicate(color)) {
 					discard;
 				}
 
 				color.rgb *= v_shade;
-				color *= texture(Sampler2, clamp(v_light, 0.5 / 16.0, 15.5 / 16.0));
+				color *= texture(Sampler2, clamp(flw_fragLight, 0.5 / 16.0, 15.5 / 16.0));
 
 				fragColor = flw_fogFilter(color);
 			}
@@ -294,15 +329,21 @@ public final class BlazeShaders {
 	 */
 	public static Identifier generate(InstanceType<?> type, int stride, Identifier fog,
 			Identifier cutout) throws IOException {
-		return generate(type, stride, fog, cutout, false);
+		return generate(type, stride, fog, cutout,
+				Identifier.fromNamespaceAndPath("flywheel", "light/smooth.glsl"), true, false, false);
 	}
 
 	/**
+	 * @param light the material's light lookup, one of Flywheel's three, pasted in unchanged
+	 * @param ambientOcclusion whether that lookup is allowed to darken the colour
+	 * @param embedded whether these instances carry their own coordinate space, which is the one
+	 *            thing {@code smooth_when_embedded} asks about
 	 * @param crumbling the block-breaking variant, which projects the breaking texture over the model
 	 *            and drops the lighting and fog that would make it read as a separate object
 	 */
 	public static Identifier generate(InstanceType<?> type, int stride, Identifier fog,
-			Identifier cutout, boolean crumbling) throws IOException {
+			Identifier cutout, Identifier light, boolean ambientOcclusion, boolean embedded,
+			boolean crumbling) throws IOException {
 		String body = ShaderIncludes.read(type.vertexShader());
 
 		String vertex = "#version 460 core\n\n"
@@ -329,9 +370,20 @@ public final class BlazeShaders {
 				+ MAIN;
 
 		String fragment = "#version 460 core\n\n"
+				// A compile-time flag because that is how the shipped shader asks the question, and
+				// the shipped shader is pasted in unchanged. It costs one extra pipeline per
+				// instance type at worst: embedded is a property of the instancer, not the draw.
+				+ (embedded ? "#define FLW_EMBEDDED\n" : "")
+				+ "#define FLW_AMBIENT_OCCLUSION " + ambientOcclusion + "\n"
 				+ BlazeUniforms.GLSL + "\n"
 				+ FRAGMENT_PREAMBLE + "\n"
 				+ (crumbling ? CRUMBLING_FRAGMENT_PREAMBLE + "\n" : "")
+				+ BUFFERS + "\n"
+				+ "struct FlwLightAo { vec2 light; float ao; };\n"
+				+ LIGHT_ACCESSORS + "\n"
+				+ ShaderIncludes.read(Identifier.fromNamespaceAndPath("flywheel",
+						"internal/light_lut.glsl")) + "\n"
+				+ ShaderIncludes.read(light) + "\n"
 				+ ShaderIncludes.read(cutout) + "\n"
 				+ ShaderIncludes.read(fog) + "\n"
 				+ (crumbling ? CRUMBLING_FRAGMENT_MAIN : FRAGMENT_MAIN);
@@ -342,7 +394,8 @@ public final class BlazeShaders {
 		// material of one instance type the first material's fog, which in the overworld is no
 		// difference at all and in the nether is every machine standing out of a red wall.
 		String name = flatten(type.vertexShader()) + "__" + flatten(cutout) + "__" + flatten(fog)
-				+ (crumbling ? "__crumbling" : "");
+				+ "__" + flatten(light) + (ambientOcclusion ? "_ao" : "")
+				+ (embedded ? "__embedded" : "") + (crumbling ? "__crumbling" : "");
 
 		return GeneratedShaders.pipeline(name, vertex, fragment);
 	}

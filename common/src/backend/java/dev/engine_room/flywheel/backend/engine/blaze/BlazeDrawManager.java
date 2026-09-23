@@ -31,6 +31,7 @@ import dev.engine_room.flywheel.api.material.WriteMask;
 import dev.engine_room.flywheel.api.model.Model;
 import dev.engine_room.flywheel.lib.material.CutoutShaders;
 import dev.engine_room.flywheel.lib.material.FogShaders;
+import dev.engine_room.flywheel.lib.material.LightShaders;
 import dev.engine_room.flywheel.backend.FlwBackend;
 import dev.engine_room.flywheel.backend.compute.FlwBufferUsage;
 import dev.engine_room.flywheel.backend.engine.AbstractInstancer;
@@ -106,6 +107,13 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			instancer.addDraw(new BlazeDraw(instancer, configured.material(),
 					meshPool.alloc(configured.mesh()), key.bias(), i));
 		}
+
+		// Sorted once, here, and never again. Two things depend on the order being fixed: draws that
+		// share a material end up next to each other, so a run of them is one indirect call, and the
+		// apply pass writes one command per draw in this order -- so a later re-sort would point
+		// every command at the wrong mesh.
+		instancer.draws()
+				.sort(ORDER);
 	}
 
 	@Override
@@ -311,12 +319,13 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	private static BlazeMaterials.Key crumblingMaterial(Material base) {
 		return new BlazeMaterials.Key(Transparency.CRUMBLING, base.depthTest(), WriteMask.COLOR,
 				base.backfaceCulling(), true, FogShaders.NONE.source(),
-				CutoutShaders.ONE_TENTH.source());
+				CutoutShaders.ONE_TENTH.source(), LightShaders.SMOOTH_WHEN_EMBEDDED.source(), false);
 	}
 
 	private @Nullable GeneratedPipeline crumblingPipelineFor(BlazeInstancer<?> instancer,
 			BlazeMaterials.Key material) {
-		var key = new PipelineKey(instancer.type, material);
+		var key = new PipelineKey(instancer.type, material,
+				instancer.environment.matrixIndex() != 0);
 
 		if (!crumblingPipelines.containsKey(key)) {
 			crumblingPipelines.put(key, GeneratedPipeline.of(instancer, material, true));
@@ -380,13 +389,24 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			pass.setVertexBuffer(0, vertices.slice());
 			pass.setIndexBuffer(indices, IndexType.INT);
 
+			// Opaque first, then translucent, and the two passes are not interchangeable. A
+			// translucent surface blends with whatever is already in the colour buffer, so one drawn
+			// before the opaque machine standing behind it blends with the sky instead -- and then
+			// the machine, being nearer in nothing but draw order, is rejected by the depth test the
+			// translucent surface already wrote. Create's fluids are the ones this shows up on.
 			for (BlazeInstancer<?> instancer : drawable) {
-				draw(pass, instancer, culled.contains(instancer));
+				draw(pass, instancer, culled.contains(instancer), false);
+			}
+
+			for (BlazeInstancer<?> instancer : drawable) {
+				draw(pass, instancer, culled.contains(instancer), true);
 			}
 		}
 	}
 
-	private void draw(RenderPass pass, BlazeInstancer<?> instancer, boolean culled) {
+	/** @param translucentPass whether this is the second pass, which draws what blends */
+	private void draw(RenderPass pass, BlazeInstancer<?> instancer, boolean culled,
+			boolean translucentPass) {
 		// Every declared binding must be supplied, and these are never absent: an empty volume is a
 		// buffer of zeros rather than nothing. Skipping the draw when there was no light yet is what
 		// made every machine in the world vanish -- a world with no light-using visual in it still
@@ -415,16 +435,18 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 
 		List<BlazeDraw> draws = instancer.draws();
 
-		if (culled) {
-			BlazeStats.indirectInstancers++;
-		} else {
-			BlazeStats.directInstancers++;
+		if (!translucentPass) {
+			if (culled) {
+				BlazeStats.indirectInstancers++;
+			} else {
+				BlazeStats.directInstancers++;
+			}
 		}
 
 		for (int first = 0; first < draws.size(); ) {
 			BlazeDraw draw = draws.get(first);
 
-			if (draw.isEmpty()) {
+			if (draw.isEmpty() || belongsToTranslucentPass(draw) != translucentPass) {
 				first++;
 				continue;
 			}
@@ -497,8 +519,12 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	 * texture, and the filter that texture is sampled with. Nothing else varies between two draws of
 	 * one instancer -- they share the type, the instance buffer and the environment by construction.
 	 */
+	private static boolean belongsToTranslucentPass(BlazeDraw draw) {
+		return BlazeMaterials.isTranslucent(BlazeMaterials.Key.of(draw.material()));
+	}
+
 	private static boolean sharesState(BlazeDraw a, BlazeDraw b) {
-		if (b.isEmpty()) {
+		if (b.isEmpty() || belongsToTranslucentPass(a) != belongsToTranslucentPass(b)) {
 			return false;
 		}
 
@@ -521,7 +547,8 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	 */
 	private @Nullable GeneratedPipeline pipelineFor(BlazeInstancer<?> instancer,
 			BlazeMaterials.Key material) {
-		var key = new PipelineKey(instancer.type, material);
+		var key = new PipelineKey(instancer.type, material,
+				instancer.environment.matrixIndex() != 0);
 
 		if (!pipelines.containsKey(key)) {
 			pipelines.put(key, GeneratedPipeline.of(instancer, material));
@@ -530,8 +557,15 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 		return pipelines.get(key);
 	}
 
-	/** What a pipeline is cached by: the shader comes from the type, the state from the material. */
-	private record PipelineKey(Object type, BlazeMaterials.Key material) {
+	/**
+	 * What a pipeline is cached by.
+	 *
+	 * <p>The shader comes from the type, the state and the rest of the shader from the material --
+	 * and {@code embedded} from neither. Whether instances carry their own coordinate space is a
+	 * property of the instancer, and {@code smooth_when_embedded} asks about it at compile time, so
+	 * two instancers of one type and material still need separate pipelines when they differ in it.
+	 */
+	private record PipelineKey(Object type, BlazeMaterials.Key material, boolean embedded) {
 	}
 
 	private static @Nullable GpuTextureView textureOf(net.minecraft.resources.Identifier location) {

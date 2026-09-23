@@ -16,6 +16,7 @@ import dev.engine_room.flywheel.api.instance.InstanceType;
 import dev.engine_room.flywheel.lib.instance.InstanceTypes;
 import dev.engine_room.flywheel.lib.material.CutoutShaders;
 import dev.engine_room.flywheel.lib.material.FogShaders;
+import dev.engine_room.flywheel.lib.material.LightShaders;
 import dev.engine_room.flywheel.lib.math.MoreMath;
 import net.minecraft.resources.Identifier;
 
@@ -128,7 +129,8 @@ public final class PipelineSelfTest {
 				dev.engine_room.flywheel.api.material.Transparency.OPAQUE,
 				dev.engine_room.flywheel.api.material.DepthTest.LEQUAL,
 				dev.engine_room.flywheel.api.material.WriteMask.COLOR_DEPTH, true, false,
-				FogShaders.LINEAR.source(), CutoutShaders.ONE_TENTH.source()));
+				FogShaders.LINEAR.source(), CutoutShaders.ONE_TENTH.source(),
+				LightShaders.SMOOTH.source(), true));
 	}
 
 	/** The same pipeline, with a material's fixed-function state baked into it. */

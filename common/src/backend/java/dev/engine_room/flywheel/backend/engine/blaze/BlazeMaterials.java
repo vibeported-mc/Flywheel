@@ -37,19 +37,23 @@ public final class BlazeMaterials {
 	 * rather than pipeline state and folding it in would build a separate pipeline per texture, and
 	 * there are hundreds.
 	 *
-	 * <p>The fog and cutout shaders do appear, although they are source rather than state, because
-	 * on 26.2 a pipeline carries its compiled shaders: two materials that fog differently cannot
-	 * share one however identical their blending is.
+	 * <p>The fog, cutout and light shaders do appear, along with the ambient occlusion flag, although
+	 * they are source rather than state: on 26.2 a pipeline carries its compiled shaders, so two
+	 * materials that fog or light differently cannot share one however identical their blending is.
 	 */
 	public record Key(Transparency transparency, DepthTest depthTest, WriteMask writeMask,
-			boolean backfaceCulling, boolean polygonOffset, Identifier fog, Identifier cutout) {
+			boolean backfaceCulling, boolean polygonOffset, Identifier fog, Identifier cutout,
+			Identifier light, boolean ambientOcclusion) {
 
 		public static Key of(Material material) {
 			return new Key(material.transparency(), material.depthTest(), material.writeMask(),
 					material.backfaceCulling(), material.polygonOffset(), material.fog()
 							.source(),
 					material.cutout()
-							.source());
+							.source(),
+					material.light()
+							.source(),
+					material.ambientOcclusion());
 		}
 
 		/** A short, stable name, so a generated shader can be keyed by it without collisions. */

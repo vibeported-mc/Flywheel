@@ -45,7 +45,8 @@ public record GeneratedPipeline(RenderPipeline pipeline, Identifier shaders) {
 		Identifier shaders;
 		try {
 			shaders = BlazeShaders.generate(instancer.type, stride, material.fog(),
-					material.cutout(), crumbling);
+					material.cutout(), material.light(), material.ambientOcclusion(),
+					instancer.environment.matrixIndex() != 0, crumbling);
 		} catch (Exception e) {
 			FlwBackend.LOGGER.error("Could not assemble a shader for {}", instancer.type, e);
 			return null;
