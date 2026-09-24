@@ -378,7 +378,8 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 				instancer.environment.matrixIndex() != 0);
 
 		if (!crumblingPipelines.containsKey(key)) {
-			crumblingPipelines.put(key, GeneratedPipeline.of(instancer, material, true));
+			crumblingPipelines.put(key, GeneratedPipeline.of(instancer, material, true,
+					lightingScene()));
 		}
 
 		return crumblingPipelines.get(key);
@@ -605,13 +606,21 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 	 * <p>{@code containsKey} rather than {@code computeIfAbsent}, which will not store a null: a
 	 * shader that did not compile would otherwise be rebuilt, and re-logged, every frame.
 	 */
+	/**
+	 * Whether environments carry a lighting scene, which is a property of what is installed rather
+	 * than of any one instancer -- so it is not part of the pipeline key, only of the shader name.
+	 */
+	private boolean lightingScene() {
+		return environmentStorage != null && BlazeEnvironments.hasLightingScene(environmentStorage);
+	}
+
 	private @Nullable GeneratedPipeline pipelineFor(BlazeInstancer<?> instancer,
 			BlazeMaterials.Key material) {
 		var key = new PipelineKey(instancer.type, material,
 				instancer.environment.matrixIndex() != 0);
 
 		if (!pipelines.containsKey(key)) {
-			pipelines.put(key, GeneratedPipeline.of(instancer, material));
+			pipelines.put(key, GeneratedPipeline.of(instancer, material, lightingScene()));
 		}
 
 		return pipelines.get(key);

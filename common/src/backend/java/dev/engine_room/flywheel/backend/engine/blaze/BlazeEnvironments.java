@@ -36,11 +36,26 @@ import dev.engine_room.flywheel.backend.engine.embed.EnvironmentStorage;
  */
 public class BlazeEnvironments implements AutoCloseable {
 	/** mat4 pose, then a mat3 as three vec4s, which is how std140 and the arena both store it. */
-	public static final int SIZE = 64 + 48;
+	public static final int BASE_SIZE = 64 + 48;
+
+	/**
+	 * The same, plus the lighting scene Sable attaches to every environment.
+	 *
+	 * <p>Sable rewrites the arena's element size and writes four more floats and a matrix after the
+	 * normal, then its own copies of Flywheel's shaders read them. Both halves of that are invisible
+	 * to this backend -- it generates its shaders rather than including Flywheel's, so Sable's
+	 * declarations never reach them -- which is how machinery inside a sub-level came to be prepared,
+	 * culled and never drawn, its pipeline failing to compile on an identifier nothing declared.
+	 *
+	 * <p>Padding included rather than implied: {@code skyLightScale} and {@code sceneId} are a float
+	 * and a uint, and std140 puts the matrix that follows them on a sixteen-byte boundary. Sable
+	 * writes those two pad words explicitly, so the layouts line up exactly.
+	 */
+	public static final int LIGHTING_SCENE_SIZE = BASE_SIZE + 16 + 64;
 
 	public static final String BLOCK_NAME = "FlwEnvironment";
 
-	public static final String GLSL = """
+	private static final String BASE_GLSL = """
 			layout(std140) uniform FlwEnvironment {
 				mat4 _flw_pose;
 				vec4 _flw_normalA;
@@ -48,6 +63,34 @@ public class BlazeEnvironments implements AutoCloseable {
 				vec4 _flw_normalC;
 			};
 			""";
+
+	private static final String LIGHTING_SCENE_GLSL = """
+			layout(std140) uniform FlwEnvironment {
+				mat4 _flw_pose;
+				vec4 _flw_normalA;
+				vec4 _flw_normalB;
+				vec4 _flw_normalC;
+				float _flw_skyLightScale;
+				uint _flw_lightingSceneId;
+				vec2 _flw_environmentPadding;
+				mat4 _flw_lightingSceneMatrix;
+			};
+			""";
+
+	/**
+	 * Whether environments carry a lighting scene, which is a question about what is installed.
+	 *
+	 * <p>Asked of the arena rather than assumed, because the answer is Sable's to give: with it
+	 * absent a record is {@link #BASE_SIZE} and declaring the longer block would have the shader read
+	 * past the end of the buffer.
+	 */
+	public static boolean hasLightingScene(EnvironmentStorage environments) {
+		return environments.arena.elementSize() >= LIGHTING_SCENE_SIZE;
+	}
+
+	public static String glsl(boolean lightingScene) {
+		return lightingScene ? LIGHTING_SCENE_GLSL : BASE_GLSL;
+	}
 
 	private final Map<Integer, GpuBuffer> buffers = new HashMap<>();
 
@@ -83,7 +126,8 @@ public class BlazeEnvironments implements AutoCloseable {
 		if (buffer == null) {
 			buffer = RenderSystem.getDevice()
 					.createBuffer(() -> "flywheel environment " + matrixIndex,
-							GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, SIZE);
+							GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST,
+							sizeOf(environments));
 			buffers.put(matrixIndex, buffer);
 
 			// Filled immediately: an environment first seen mid-frame is drawn in that same frame,
@@ -102,20 +146,27 @@ public class BlazeEnvironments implements AutoCloseable {
 		buffers.clear();
 	}
 
+	/** As many bytes as a record actually occupies, which is Sable's to decide. */
+	private static int sizeOf(EnvironmentStorage environments) {
+		return (int) Math.max(BASE_SIZE, environments.arena.elementSize());
+	}
+
 	private void upload(EnvironmentStorage environments, int matrixIndex, GpuBuffer buffer) {
+		int size = sizeOf(environments);
+
 		if (matrixIndex == 0) {
-			Staging.upload(buffer.slice(), identity());
+			Staging.upload(buffer.slice(), identity(size));
 			return;
 		}
 
 		// Straight out of the arena: Flywheel already stores the record in the layout the shader
 		// declares, so this is a copy rather than a conversion.
 		Staging.upload(buffer.slice(),
-				MemoryUtil.memByteBuffer(environments.arena.indexToPointer(matrixIndex), SIZE));
+				MemoryUtil.memByteBuffer(environments.arena.indexToPointer(matrixIndex), size));
 	}
 
-	private static ByteBuffer identity() {
-		ByteBuffer data = ByteBuffer.allocateDirect(SIZE)
+	private static ByteBuffer identity(int size) {
+		ByteBuffer data = ByteBuffer.allocateDirect(size)
 				.order(ByteOrder.nativeOrder());
 
 		for (int i = 0; i < 4; i++) {

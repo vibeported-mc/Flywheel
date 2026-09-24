@@ -10,6 +10,17 @@ public abstract class AbstractArena {
 	// Monotonic index, generally represents the size of the arena.
 	private int top = 0;
 
+	/**
+	 * How many bytes one element occupies.
+	 *
+	 * <p>Not a constant to its readers, and that is the point. Sable rewrites the argument this is
+	 * constructed with so an embedded environment carries its lighting scene alongside the pose, so
+	 * anything that copies a record out of here has to ask rather than assume.
+	 */
+	public long elementSize() {
+		return elementSizeBytes;
+	}
+
 	public AbstractArena(long elementSizeBytes) {
 		this.elementSizeBytes = elementSizeBytes;
 	}

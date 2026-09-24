@@ -34,13 +34,13 @@ public record GeneratedPipeline(RenderPipeline pipeline, Identifier shaders) {
 	 * way to read an error reported as a line number in a file that exists nowhere.
 	 */
 	public static @Nullable GeneratedPipeline of(BlazeInstancer<?> instancer,
-			BlazeMaterials.Key material) {
-		return of(instancer, material, false);
+			BlazeMaterials.Key material, boolean lightingScene) {
+		return of(instancer, material, false, lightingScene);
 	}
 
 	/** @param crumbling the block-breaking variant of the same instance type */
 	public static @Nullable GeneratedPipeline of(BlazeInstancer<?> instancer,
-			BlazeMaterials.Key material, boolean crumbling) {
+			BlazeMaterials.Key material, boolean crumbling, boolean lightingScene) {
 		int stride = MoreMath.align16(instancer.type.layout()
 				.byteSize());
 
@@ -49,7 +49,7 @@ public record GeneratedPipeline(RenderPipeline pipeline, Identifier shaders) {
 			shaders = BlazeShaders.generate(instancer.type, stride, material.fog(),
 					material.cutout(), material.light(), material.ambientOcclusion(),
 					material.cardinalLighting(), material.useLight(),
-					instancer.environment.matrixIndex() != 0, crumbling);
+					instancer.environment.matrixIndex() != 0, crumbling, lightingScene);
 		} catch (Exception e) {
 			FlwBackend.LOGGER.error("Could not assemble a shader for {}", instancer.type, e);
 			return null;

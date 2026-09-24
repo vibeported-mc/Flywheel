@@ -176,6 +176,15 @@ public final class BlazeShaders {
 				// is positioned in the contraption's space rather than the world's, so without this
 				// the parts draw where the contraption was assembled while the contraption itself
 				// flies away empty. For anything unembedded this is an identity.
+			#ifdef FLW_LIGHTING_SCENE
+				// Before the pose, and that ordering is Sable's rather than a choice: a lighting
+				// scene is addressed in the environment's own space, so the position handed to it
+				// has to be the one the environment has not yet moved.
+				flw_vertexLightingPos = _flw_lightingSceneMatrix * flw_vertexPos;
+				flw_vertexLightingSceneId = _flw_lightingSceneId;
+				flw_skyLightScale = _flw_skyLightScale;
+			#endif
+
 				flw_vertexPos = _flw_pose * flw_vertexPos;
 				flw_vertexNormal = mat3(_flw_normalA.xyz, _flw_normalB.xyz, _flw_normalC.xyz)
 						* flw_vertexNormal;
@@ -336,8 +345,35 @@ public final class BlazeShaders {
 			Identifier cutout) throws IOException {
 		return generate(type, stride, fog, cutout,
 				Identifier.fromNamespaceAndPath("flywheel", "light/smooth.glsl"), true,
-				CardinalLightingMode.CHUNK, true, false, false);
+				CardinalLightingMode.CHUNK, true, false, false, false);
 	}
+
+	/**
+	 * What an environment carrying a lighting scene adds to both stages.
+	 *
+	 * <p>Sable's light shaders read three things the stock ones do not: which lighting scene an
+	 * instance belongs to, where it sits inside that scene, and how far to scale sky light. They are
+	 * computed per vertex and used per fragment, so they cross between the stages -- and the scene id
+	 * is flat, because interpolating an index between corners would ask the light volume for a scene
+	 * that does not exist.
+	 *
+	 * <p>Declared here rather than included from Flywheel's own {@code common.vert}, which is the
+	 * file Sable overrides to declare them: this backend generates its shaders instead of including
+	 * that one, so Sable's declarations never arrived and only its uses did. The pipeline then failed
+	 * to compile on an undeclared identifier, and machinery inside a sub-level was prepared, culled
+	 * and never drawn.
+	 */
+	private static final String LIGHTING_SCENE_VERTEX_OUT = """
+			flat out uint flw_vertexLightingSceneId;
+			flat out float flw_skyLightScale;
+			out vec4 flw_vertexLightingPos;
+			""";
+
+	private static final String LIGHTING_SCENE_FRAGMENT_IN = """
+			flat in uint flw_vertexLightingSceneId;
+			flat in float flw_skyLightScale;
+			in vec4 flw_vertexLightingPos;
+			""";
 
 	/**
 	 * @param light the material's light lookup, one of Flywheel's three, pasted in unchanged
@@ -350,7 +386,11 @@ public final class BlazeShaders {
 	public static Identifier generate(InstanceType<?> type, int stride, Identifier fog,
 			Identifier cutout, Identifier light, boolean ambientOcclusion,
 			CardinalLightingMode cardinalLighting, boolean useLight, boolean embedded,
-			boolean crumbling) throws IOException {
+			boolean crumbling, boolean lightingScene) throws IOException {
+		// Only an embedded instance has an environment to take a scene from, and only a build with
+		// Sable in it has scenes at all.
+		boolean scene = embedded && lightingScene;
+
 		String body = ShaderIncludes.read(type.vertexShader());
 
 		String vertex = "#version 460 core\n\n"
@@ -358,7 +398,9 @@ public final class BlazeShaders {
 						+ "\n" : "")
 				+ ATTRIBUTES + "\n"
 				+ BlazeUniforms.GLSL + "\n"
-				+ BlazeEnvironments.GLSL + "\n"
+				+ (scene ? "#define FLW_LIGHTING_SCENE\n" : "")
+				+ BlazeEnvironments.glsl(scene) + "\n"
+				+ (scene ? LIGHTING_SCENE_VERTEX_OUT + "\n" : "")
 				+ BUFFERS + "\n"
 				+ InstanceGlsl.struct(type.layout()) + "\n"
 				+ InstanceGlsl.texelAccessor(stride) + "\n"
@@ -383,6 +425,7 @@ public final class BlazeShaders {
 				+ "#define FLW_AMBIENT_OCCLUSION " + ambientOcclusion + "\n"
 				+ "#define FLW_USE_LIGHT " + (useLight ? 1 : 0) + "\n"
 				+ BlazeUniforms.GLSL + "\n"
+				+ (scene ? LIGHTING_SCENE_FRAGMENT_IN + "\n" : "")
 				+ FRAGMENT_PREAMBLE + "\n"
 				+ (crumbling ? CRUMBLING_FRAGMENT_PREAMBLE + "\n" : "")
 				+ BUFFERS + "\n"
@@ -410,7 +453,8 @@ public final class BlazeShaders {
 				+ "__" + cardinalLighting.name()
 						.toLowerCase()
 				+ (useLight ? "_lit" : "")
-				+ (embedded ? "__embedded" : "") + (crumbling ? "__crumbling" : "");
+				+ (embedded ? "__embedded" : "") + (scene ? "__scene" : "")
+				+ (crumbling ? "__crumbling" : "");
 
 		return GeneratedShaders.pipeline(name, vertex, fragment);
 	}
