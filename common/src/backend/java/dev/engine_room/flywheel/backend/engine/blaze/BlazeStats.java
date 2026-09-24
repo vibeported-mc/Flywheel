@@ -29,6 +29,21 @@ public final class BlazeStats {
 	public static volatile int directCalls;
 
 	/**
+	 * Where a draw went, when it did not go to the GPU.
+	 *
+	 * <p>An instancer counted above with no calls under it is the shape of failure these exist for:
+	 * the instances survived culling and then nothing was issued. Four things can do that and from
+	 * outside they are identical -- the picture simply lacks the machine.
+	 */
+	public static volatile int instancersWithNoDraws;
+
+	public static volatile int drawsEmpty;
+
+	public static volatile int drawsWithoutTexture;
+
+	public static volatile int drawsWithoutPipeline;
+
+	/**
 	 * Draws issued for the block-breaking overlay in the last frame that had any.
 	 *
 	 * <p>Not reset with the others, because crumbling is drawn in its own pass and most frames have
@@ -77,6 +92,10 @@ public final class BlazeStats {
 		indirectInstancers = 0;
 		directInstancers = 0;
 		indirectCalls = 0;
+		instancersWithNoDraws = 0;
+		drawsEmpty = 0;
+		drawsWithoutTexture = 0;
+		drawsWithoutPipeline = 0;
 		directCalls = 0;
 	}
 }

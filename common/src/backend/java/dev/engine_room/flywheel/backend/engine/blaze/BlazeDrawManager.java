@@ -494,10 +494,17 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			}
 		}
 
+		if (draws.isEmpty() && !translucentPass) {
+			BlazeStats.instancersWithNoDraws++;
+		}
+
 		for (int first = 0; first < draws.size(); ) {
 			BlazeDraw draw = draws.get(first);
 
 			if (draw.isEmpty() || belongsToTranslucentPass(draw) != translucentPass) {
+				if (draw.isEmpty() && !translucentPass) {
+					BlazeStats.drawsEmpty++;
+				}
 				first++;
 				continue;
 			}
@@ -505,6 +512,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			GpuTextureView diffuse = textureOf(draw.material()
 					.texture());
 			if (diffuse == null) {
+				BlazeStats.drawsWithoutTexture++;
 				first++;
 				continue;
 			}
@@ -517,6 +525,7 @@ public class BlazeDrawManager extends DrawManager<BlazeInstancer<?>> {
 			GeneratedPipeline pipeline = pipelineFor(instancer, material);
 
 			if (pipeline == null) {
+				BlazeStats.drawsWithoutPipeline++;
 				first++;
 				continue;
 			}
